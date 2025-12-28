@@ -25,6 +25,8 @@
 #include "StdAfx.h"
 #include "resource.h"
 #include "ErksMainDialog.h"
+#include "ErksIntro.h"
+#include "ErksUiController.h"
 
 //-----------------------------------------------------------------------------
 #define szRDS _RXST("Erks")
@@ -135,8 +137,8 @@ public:
 	
 	static void ErksMyGroupErks () {
 		CAcModuleResourceOverride resOverride;
-		CErksMainDialog dlg(acedGetAcadFrame());
-		dlg.DoModal();
+
+		CErksUiController::Instance().ShowIntroThenUi(acedGetAcadFrame());
 	}
 } ;
 

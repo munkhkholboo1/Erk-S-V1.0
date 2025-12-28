@@ -103,6 +103,15 @@ END
 
 /////////////////////////////////////////////////////////////////////////////
 //
+// PNG
+//
+
+IDB_ERKS_LOGO_64           PNG                     "Images\\Erk-S_logo-64x64.png"
+IDB_ERKS_INTRO_PNG          PNG                     "Images\\Intro.png"
+IDB_ERKS_LOGO_100           PNG                     "Images\\Erk-S_logo-100x100.png"
+
+/////////////////////////////////////////////////////////////////////////////
+//
 // Menu
 //
 
@@ -130,15 +139,16 @@ END
 // Dialog
 //
 
-IDD_ERKS_MAIN DIALOGEX 0, 0, 320, 200
+IDD_ERKS_MAIN DIALOGEX 0, 0, 2560, 1440
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX
 CAPTION "Erk-S V1.0"
 MENU IDM_ERKS_MAIN
 FONT 9, "Segoe UI", 0, 0, 0x0
 BEGIN
-    DEFPUSHBUTTON   "OK",IDOK,209,179,50,14
-    PUSHBUTTON      "Cancel",IDCANCEL,263,179,50,14
 END
 
 #endif    // !_MAC
+
+
+
 

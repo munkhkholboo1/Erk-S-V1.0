@@ -62,6 +62,8 @@
 #include <afxwin.h> //- MFC core and standard components
 #include <afxext.h> //- MFC extensions
 #include <afxcmn.h> //- MFC support for Windows Common Controls
+#include <afxdlgs.h> //- MFC common dialogs
+#include <afxdisp.h>
 
                 //-----------------------------------------------------------------------------
     //- Include ObjectDBX/ObjectARX headers
@@ -85,4 +87,4 @@
 
                 #pragma pack(pop)
 
-    
+        

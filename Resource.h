@@ -17,6 +17,10 @@
 
 #define ID_ERKS_HELP_ABOUT                   40100
 
+#define IDB_ERKS_LOGO_64                     500
+#define IDB_ERKS_INTRO_PNG                   501
+#define IDB_ERKS_LOGO_100                    502
+
 // Next default values for new objects
 //
 #ifdef APSTUDIO_INVOKED

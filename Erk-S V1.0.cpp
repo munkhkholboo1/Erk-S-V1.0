@@ -44,6 +44,8 @@ BOOL WINAPI DllMain (HINSTANCE hInstance, DWORD dwReason, LPVOID lpReserved) {
         _hdllInstance =hInstance ;
 		ErkSV10DLL.AttachInstance (hInstance) ;
 		InitAcUiDLL () ;
+
+		// Intro is PNG-based; no ActiveX/AtlAxWin initialization needed.
 	} else if ( dwReason == DLL_PROCESS_DETACH ) {
 		ErkSV10DLL.DetachInstance () ;
 	}
