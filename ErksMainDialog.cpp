@@ -3,6 +3,9 @@
 #include "ErksUiController.h"
 #include "VersionStamp.h"
 #include "ErksRuntimeTrace.h"
+#include "ErksPopupMenuWnd.h"
+
+static std::vector<ErksPopupMenuItem> BuildPopupModel(CMenu* menu, CErksMainDialog* dlg);
 
 #include <dwmapi.h>
 #include <wincodec.h>
@@ -99,9 +102,8 @@ void CErksMainDialog::ApplyOwnerDrawToMenu(CMenu* menu)
             continue;
         }
 
-        if (id == 0) // separator
-            continue;
-
+        // Include separators in owner-draw so we can render them in the same dark theme.
+        // Separators have id == 0.
         MENUITEMINFO mii{};
         mii.cbSize = sizeof(mii);
         mii.fMask = MIIM_FTYPE | MIIM_ID;
@@ -485,6 +487,14 @@ void CErksMainDialog::OnMeasureItem(int nIDCtl, LPMEASUREITEMSTRUCT lpMeasureIte
     if (!lpMeasureItemStruct || lpMeasureItemStruct->CtlType != ODT_MENU)
         return;
 
+    // Separator items have itemID == 0 when using standard menus.
+    if (lpMeasureItemStruct->itemID == 0)
+    {
+        lpMeasureItemStruct->itemHeight = 10; // padding around the line
+        lpMeasureItemStruct->itemWidth = 1;   // width ignored by the system for menus
+        return;
+    }
+
     auto it = m_menuTextById.find((UINT)lpMeasureItemStruct->itemID);
     const std::wstring text = (it != m_menuTextById.end()) ? it->second : L"";
 
@@ -508,11 +518,30 @@ void CErksMainDialog::OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT lpDrawItemStruct)
     CDC dc;
     dc.Attach(lpDrawItemStruct->hDC);
 
+    CRect rc(lpDrawItemStruct->rcItem);
+
+    // Draw separator as a thin gray line on the dark background.
+    if (lpDrawItemStruct->itemID == 0)
+    {
+        dc.FillSolidRect(&rc, m_backColor);
+
+        const int y = rc.top + (rc.Height() / 2);
+        const int left = rc.left + 12;
+        const int right = rc.right - 12;
+
+        CPen pen(PS_SOLID, 1, m_borderColor);
+        CPen* oldPen = dc.SelectObject(&pen);
+        dc.MoveTo(left, y);
+        dc.LineTo(right, y);
+        dc.SelectObject(oldPen);
+
+        dc.Detach();
+        return;
+    }
+
     const UINT itemState = lpDrawItemStruct->itemState;
     const bool selected = (itemState & ODS_SELECTED) != 0;
     const bool disabled = (itemState & (ODS_DISABLED | ODS_GRAYED)) != 0;
-
-    CRect rc(lpDrawItemStruct->rcItem);
 
     // Fill entire item rect to eliminate light menu bar background bleed.
     const COLORREF back = selected ? m_hotBackColor : m_backColor;
@@ -521,10 +550,14 @@ void CErksMainDialog::OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT lpDrawItemStruct)
 
     if (selected)
     {
+        // Use a thin gray outline instead of the default thick/bright selection border.
+        CRect frame = rc;
+        frame.DeflateRect(1, 1);
+
         CPen pen(PS_SOLID, 1, m_borderColor);
         CPen* oldPen = dc.SelectObject(&pen);
         HBRUSH oldBrush = (HBRUSH)dc.SelectStockObject(NULL_BRUSH);
-        dc.Rectangle(&rc);
+        dc.Rectangle(&frame);
         dc.SelectObject(oldBrush);
         dc.SelectObject(oldPen);
     }
@@ -611,10 +644,17 @@ void CErksMainDialog::ShowTopMenuPopup(int topIndex, const CRect& rcItem)
     if (!top)
         return;
 
+    // Where to show
     CPoint pt(rcItem.left, rcItem.bottom);
     ClientToScreen(&pt);
 
-    top->TrackPopupMenu(TPM_LEFTALIGN | TPM_TOPALIGN | TPM_LEFTBUTTON, pt.x, pt.y, this);
+    // Build model from submenu
+    const std::vector<ErksPopupMenuItem> items = BuildPopupModel(top, this);
+
+    CErksPopupMenuWnd popup;
+    UINT cmd = popup.Track(this, pt, items, m_backColor, m_textColor, m_hotBackColor, m_borderColor);
+    if (cmd != 0)
+        PostMessage(WM_COMMAND, cmd, 0);
 }
 
 void CErksMainDialog::OnPaint()
@@ -701,4 +741,66 @@ void CErksMainDialog::OnSize(UINT nType, int cx, int cy)
 {
     CAdUiDialog::OnSize(nType, cx, cy);
     Invalidate(FALSE);
+}
+
+static std::vector<ErksPopupMenuItem> BuildPopupModel(CMenu* menu, CErksMainDialog* dlg)
+{
+    std::vector<ErksPopupMenuItem> items;
+    if (!menu)
+        return items;
+
+    const int count = menu->GetMenuItemCount();
+    items.reserve((size_t)count);
+
+    for (int i = 0; i < count; ++i)
+    {
+        UINT id = menu->GetMenuItemID(i);
+
+        // separator
+        if (id == 0)
+        {
+            items.push_back(ErksPopupMenuItem{});
+            continue;
+        }
+
+        // submenus are not supported in this custom popup yet; skip.
+        if (id == (UINT)-1)
+            continue;
+
+        MENUITEMINFO mii{};
+        mii.cbSize = sizeof(mii);
+        mii.fMask = MIIM_STATE;
+        bool enabled = true;
+        if (GetMenuItemInfo(menu->GetSafeHmenu(), i, TRUE, &mii))
+            enabled = (mii.fState & (MFS_DISABLED | MFS_GRAYED)) == 0;
+
+        std::wstring text;
+        if (dlg)
+        {
+            if (const std::wstring* cached = dlg->TryGetMenuText(id))
+                text = *cached;
+        }
+        if (text.empty())
+        {
+            CString t;
+            menu->GetMenuString(i, t, MF_BYPOSITION);
+            text = StripAmpersand(std::wstring(t));
+        }
+
+        ErksPopupMenuItem item;
+        item.id = id;
+        item.text = text;
+        item.enabled = enabled;
+        items.push_back(std::move(item));
+    }
+
+    return items;
+}
+
+const std::wstring* CErksMainDialog::TryGetMenuText(UINT id) const
+{
+    auto it = m_menuTextById.find(id);
+    if (it == m_menuTextById.end())
+        return nullptr;
+    return &it->second;
 }

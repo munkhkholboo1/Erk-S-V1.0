@@ -15,6 +15,7 @@
     <ClCompile Include="DocData.cpp" />
     <ClCompile Include="Erk-S V1.0.cpp" />
     <ClCompile Include="ErksMainDialog.cpp" />
+    <ClCompile Include="ErksPopupMenuWnd.cpp" />
     <ClCompile Include="ErksRuntimeTrace.cpp" />
     <ClCompile Include="ErksUiController.cpp" />
     <ClCompile Include="StdAfx.cpp">
@@ -25,6 +26,7 @@
   <ItemGroup>
     <ClInclude Include="DocData.h" />
     <ClInclude Include="ErksMainDialog.h" />
+    <ClInclude Include="ErksPopupMenuWnd.h" />
     <ClInclude Include="ErksRuntimeTrace.h" />
     <ClInclude Include="ErksUiController.h" />
     <ClInclude Include="Resource.h" />

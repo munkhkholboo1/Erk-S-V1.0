@@ -15,6 +15,8 @@ public:
     void RefreshFrameStyles();
     void ForceTopLevelWindow();
 
+    const std::wstring* TryGetMenuText(UINT id) const;
+
 protected:
     virtual BOOL OnInitDialog() override;
     virtual BOOL OnCommand(WPARAM wParam, LPARAM lParam) override;
@@ -67,3 +69,4 @@ private:
     void DrawMenuStrip(CDC& dc);
     void ShowTopMenuPopup(int topIndex, const CRect& rcItem);
 };
+    
