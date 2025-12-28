@@ -1,6 +1,7 @@
 #include "StdAfx.h"
 #include "ErksMainDialog.h"
 #include "ErksUiController.h"
+#include "VersionStamp.h"
 
 #include <dwmapi.h>
 #include <wincodec.h>
@@ -30,6 +31,7 @@ BEGIN_MESSAGE_MAP(CErksMainDialog, CAdUiDialog)
     ON_WM_SIZE()
     ON_WM_NCHITTEST()
     ON_WM_SYSCOMMAND()
+    ON_WM_NCLBUTTONDOWN()
 END_MESSAGE_MAP()
 
 CErksMainDialog::CErksMainDialog(CWnd* pParent)
@@ -260,9 +262,32 @@ static HINSTANCE ErksResourceHandle()
     return _hdllInstance ? _hdllInstance : AfxGetResourceHandle();
 }
 
+void CErksMainDialog::RefreshFrameStyles()
+{
+    if (!GetSafeHwnd())
+        return;
+
+    LONG_PTR style = ::GetWindowLongPtr(GetSafeHwnd(), GWL_STYLE);
+    style &= ~WS_CHILD;
+    style |= (WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME);
+    style &= ~(DS_MODALFRAME);
+    ::SetWindowLongPtr(GetSafeHwnd(), GWL_STYLE, style);
+
+    LONG_PTR exStyle = ::GetWindowLongPtr(GetSafeHwnd(), GWL_EXSTYLE);
+    exStyle |= WS_EX_APPWINDOW;
+    exStyle &= ~WS_EX_TOOLWINDOW;
+    ::SetWindowLongPtr(GetSafeHwnd(), GWL_EXSTYLE, exStyle);
+
+    ::SetWindowPos(GetSafeHwnd(), nullptr, 0, 0, 0, 0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE);
+}
+
 BOOL CErksMainDialog::OnInitDialog()
 {
     CAdUiDialog::OnInitDialog();
+
+    ErksPrint(L"%s", ERKS_BUILD_STAMP_W);
+    ErksPrint(L"Resource FileVersion=%s", ERKS_FILE_VERSION_W);
 
     ErksPrint(L"OnInitDialog hwnd=%p", GetSafeHwnd());
 
@@ -278,21 +303,7 @@ BOOL CErksMainDialog::OnInitDialog()
         cancel->DestroyWindow();
     }
 
-    // Re-enable caption buttons and resizing (AutoCAD/AdUi may alter these)
-    // Also ensure it's not a child window; child windows cannot be minimized/maximized.
-    LONG_PTR dlgStyle = ::GetWindowLongPtr(GetSafeHwnd(), GWL_STYLE);
-    dlgStyle &= ~WS_CHILD;
-    dlgStyle |= (WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME);
-    dlgStyle &= ~(DS_MODALFRAME);
-    ::SetWindowLongPtr(GetSafeHwnd(), GWL_STYLE, dlgStyle);
-
-    LONG_PTR exStyle = ::GetWindowLongPtr(GetSafeHwnd(), GWL_EXSTYLE);
-    exStyle |= WS_EX_APPWINDOW;
-    exStyle &= ~WS_EX_TOOLWINDOW;
-    ::SetWindowLongPtr(GetSafeHwnd(), GWL_EXSTYLE, exStyle);
-
-    ::SetWindowPos(GetSafeHwnd(), nullptr, 0, 0, 0, 0,
-        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE);
+    RefreshFrameStyles();
 
     EnableImmersiveDarkTitleBar(GetSafeHwnd());
 
@@ -606,4 +617,22 @@ void CErksMainDialog::OnSize(UINT nType, int cx, int cy)
 
     if (GetSafeHwnd() && GetMenu())
         DrawMenuBar();
+}
+
+void CErksMainDialog::OnNcLButtonDown(UINT nHitTest, CPoint point)
+{
+    switch (nHitTest)
+    {
+    case HTLEFT: case HTRIGHT: case HTTOP: case HTBOTTOM:
+    case HTTOPLEFT: case HTTOPRIGHT: case HTBOTTOMLEFT: case HTBOTTOMRIGHT:
+        SendMessage(WM_SYSCOMMAND, SC_SIZE + nHitTest, MAKELPARAM(point.x, point.y));
+        return;
+    case HTCAPTION:
+        SendMessage(WM_SYSCOMMAND, SC_MOVE | HTCAPTION, MAKELPARAM(point.x, point.y));
+        return;
+    default:
+        break;
+    }
+
+    CAdUiDialog::OnNcLButtonDown(nHitTest, point);
 }

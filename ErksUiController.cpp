@@ -72,6 +72,8 @@ void CErksUiController::ShowUi(CWnd* pParent)
         return;
     }
 
+    m_dlg->RefreshFrameStyles();
+
     m_dlg->ShowWindow(SW_SHOW);
     m_dlg->SetForegroundWindow();
 }

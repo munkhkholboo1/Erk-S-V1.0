@@ -12,6 +12,8 @@ public:
     explicit CErksMainDialog(CWnd* pParent = nullptr);
     enum { IDD = IDD_ERKS_MAIN };
 
+    void RefreshFrameStyles();
+
 protected:
     virtual BOOL OnInitDialog() override;
     virtual BOOL OnCommand(WPARAM wParam, LPARAM lParam) override;
@@ -29,6 +31,7 @@ protected:
     afx_msg void OnSize(UINT nType, int cx, int cy);
     afx_msg LRESULT OnNcHitTest(CPoint point);
     afx_msg void OnSysCommand(UINT nID, LPARAM lParam);
+    afx_msg void OnNcLButtonDown(UINT nHitTest, CPoint point);
 
     DECLARE_MESSAGE_MAP()
 
