@@ -24,6 +24,7 @@
 //-----------------------------------------------------------------------------
 #include "StdAfx.h"
 #include "resource.h"
+#include "ErksMainDialog.h"
 
 //-----------------------------------------------------------------------------
 #define szRDS _RXST("Erks")
@@ -133,7 +134,9 @@ public:
 	}
 	
 	static void ErksMyGroupErks () {
-		acutPrintf(ACRX_T("\nERKS команд ажиллалаа.\n"));
+		CAcModuleResourceOverride resOverride;
+		CErksMainDialog dlg(acedGetAcadFrame());
+		dlg.DoModal();
 	}
 } ;
 

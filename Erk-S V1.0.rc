@@ -99,3 +99,46 @@ END
 /////////////////////////////////////////////////////////////////////////////
 #endif    // not APSTUDIO_INVOKED
 
+#ifndef _MAC
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Menu
+//
+
+IDM_ERKS_MAIN MENU
+BEGIN
+    POPUP "&File"
+    BEGIN
+        MENUITEM "&Open",                       ID_ERKS_FILE_OPEN
+        MENUITEM "&Save",                       ID_ERKS_FILE_SAVE
+        MENUITEM "Save &As",                    ID_ERKS_FILE_SAVEAS
+        MENUITEM SEPARATOR
+        MENUITEM "Open Existing Data",          ID_ERKS_FILE_OPEN_EXISTING_DATA
+        MENUITEM "Create Road Axis",            ID_ERKS_FILE_CREATE_ROAD_AXIS
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit",                       ID_ERKS_FILE_EXIT
+    END
+    POPUP "&About"
+    BEGIN
+        MENUITEM "&About",                      ID_ERKS_HELP_ABOUT
+    END
+END
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Dialog
+//
+
+IDD_ERKS_MAIN DIALOGEX 0, 0, 320, 200
+STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX
+CAPTION "Erk-S V1.0"
+MENU IDM_ERKS_MAIN
+FONT 9, "Segoe UI", 0, 0, 0x0
+BEGIN
+    DEFPUSHBUTTON   "OK",IDOK,209,179,50,14
+    PUSHBUTTON      "Cancel",IDCANCEL,263,179,50,14
+END
+
+#endif    // !_MAC
+
