@@ -25,8 +25,10 @@
 #include "StdAfx.h"
 #include "resource.h"
 #include "ErksMainDialog.h"
-#include "ErksIntro.h"
 #include "ErksUiController.h"
+#include "ErksRuntimeTrace.h"
+
+extern HINSTANCE _hdllInstance;
 
 //-----------------------------------------------------------------------------
 #define szRDS _RXST("Erks")
@@ -43,20 +45,17 @@ public:
 
 		// You *must* call On_kInitAppMsg here
 		AcRx::AppRetCode retCode =AcRxArxApp::On_kInitAppMsg (pkt) ;
-		
-		// TODO: Add your initialization code here
+
+		ErksRuntimeTrace::DumpModuleIdentity((HMODULE)_hdllInstance, L"Init ARX (_hdllInstance)");
+		ErksRuntimeTrace::DumpModuleIdentity((HMODULE)AfxGetResourceHandle(), L"Init Resources (AfxGetResourceHandle)");
 
 		return (retCode) ;
 	}
 
 	virtual AcRx::AppRetCode On_kUnloadAppMsg (void *pkt) {
-		// TODO: Add your code here
+		ErksRuntimeTrace::DumpModuleIdentity((HMODULE)_hdllInstance, L"Unload ARX (_hdllInstance)");
 
-		// You *must* call On_kUnloadAppMsg here
 		AcRx::AppRetCode retCode =AcRxArxApp::On_kUnloadAppMsg (pkt) ;
-
-		// TODO: Unload dependencies here
-
 		return (retCode) ;
 	}
 
@@ -138,11 +137,14 @@ public:
 	static void ErksMyGroupErks () {
 		CAcModuleResourceOverride resOverride;
 
+		ErksRuntimeTrace::DumpModuleIdentity((HMODULE)_hdllInstance, L"Command ERKS ARX (_hdllInstance)");
+		ErksRuntimeTrace::DumpModuleIdentity((HMODULE)AfxGetResourceHandle(), L"Command ERKS Resources (AfxGetResourceHandle)");
+
 		CErksUiController::Instance().ShowIntroThenUi(acedGetAcadFrame());
 	}
 } ;
 
-//-----------------------------------------------------------------------------
+ //-----------------------------------------------------------------------------
 IMPLEMENT_ARX_ENTRYPOINT(CErkSV10App)
 
 ACED_ARXCOMMAND_ENTRY_AUTO(CErkSV10App, ErksMyGroup, Erks, Erks, ACRX_CMD_MODAL | ACRX_CMD_SESSION, NULL)

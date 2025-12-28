@@ -27,13 +27,13 @@
     <ClCompile Include="Erk-S V1.0.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="ErksIntro.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="ErksMainDialog.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="ErksUiController.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ErksRuntimeTrace.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -47,9 +47,6 @@
     <ClInclude Include="Resource.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="ErksIntro.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="ErksMainDialog.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -57,6 +54,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="VersionStamp.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ErksRuntimeTrace.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

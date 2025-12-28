@@ -13,8 +13,6 @@ public:
     void ClearDialog();
 
 protected:
-    afx_msg LRESULT OnIntroClosed(WPARAM wParam, LPARAM lParam);
-
     DECLARE_MESSAGE_MAP()
 
 private:

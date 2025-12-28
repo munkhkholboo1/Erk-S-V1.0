@@ -13,6 +13,7 @@ public:
     enum { IDD = IDD_ERKS_MAIN };
 
     void RefreshFrameStyles();
+    void ForceTopLevelWindow();
 
 protected:
     virtual BOOL OnInitDialog() override;
@@ -32,6 +33,8 @@ protected:
     afx_msg LRESULT OnNcHitTest(CPoint point);
     afx_msg void OnSysCommand(UINT nID, LPARAM lParam);
     afx_msg void OnNcLButtonDown(UINT nHitTest, CPoint point);
+    afx_msg void OnPaint();
+    afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
 
     DECLARE_MESSAGE_MAP()
 
@@ -55,4 +58,12 @@ private:
     void OnFileCreateRoadAxis();
     void OnFileExit();
     void OnHelpAbout();
+
+    int m_menuStripHeight = 32;
+    CRect m_rcMenuFile;
+    CRect m_rcMenuAbout;
+
+    void RecalcMenuStripRects();
+    void DrawMenuStrip(CDC& dc);
+    void ShowTopMenuPopup(int topIndex, const CRect& rcItem);
 };

@@ -1,15 +1,9 @@
 #include "StdAfx.h"
 #include "ErksUiController.h"
 
-#include "ErksIntro.h"
 #include "ErksMainDialog.h"
 
-namespace {
-    constexpr UINT WM_ERKS_INTRO_CLOSED = WM_APP + 0x2A11;
-}
-
 BEGIN_MESSAGE_MAP(CErksUiController, CWnd)
-    ON_MESSAGE(WM_ERKS_INTRO_CLOSED, &CErksUiController::OnIntroClosed)
 END_MESSAGE_MAP()
 
 CErksUiController& CErksUiController::Instance()
@@ -38,18 +32,7 @@ void CErksUiController::ShowIntroThenUi(CWnd* pParent)
         return;
     }
 
-    // Start intro (self-deletes). When it closes, we receive WM_ERKS_INTRO_CLOSED.
-    CErksIntro* intro = new CErksIntro();
-    intro->Show(960, 540, 2000, GetSafeHwnd(), WM_ERKS_INTRO_CLOSED, 0, (LPARAM)pParent);
-}
-
-LRESULT CErksUiController::OnIntroClosed(WPARAM wParam, LPARAM lParam)
-{
-    UNREFERENCED_PARAMETER(wParam);
-
-    CWnd* parent = (CWnd*)lParam;
-    ShowUi(parent);
-    return 0;
+    ShowUi(pParent);
 }
 
 void CErksUiController::ShowUi(CWnd* pParent)
@@ -60,8 +43,6 @@ void CErksUiController::ShowUi(CWnd* pParent)
         return;
     }
 
-    // Create as a top-level tool window instead of parenting to AutoCAD frame;
-    // parenting can cause AutoCAD to suppress sizing and min/max behaviors.
     UNREFERENCED_PARAMETER(pParent);
 
     m_dlg = new CErksMainDialog(nullptr);

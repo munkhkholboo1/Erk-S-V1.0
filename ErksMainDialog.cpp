@@ -2,6 +2,7 @@
 #include "ErksMainDialog.h"
 #include "ErksUiController.h"
 #include "VersionStamp.h"
+#include "ErksRuntimeTrace.h"
 
 #include <dwmapi.h>
 #include <wincodec.h>
@@ -32,6 +33,8 @@ BEGIN_MESSAGE_MAP(CErksMainDialog, CAdUiDialog)
     ON_WM_NCHITTEST()
     ON_WM_SYSCOMMAND()
     ON_WM_NCLBUTTONDOWN()
+    ON_WM_PAINT()
+    ON_WM_LBUTTONDOWN()
 END_MESSAGE_MAP()
 
 CErksMainDialog::CErksMainDialog(CWnd* pParent)
@@ -262,6 +265,16 @@ static HINSTANCE ErksResourceHandle()
     return _hdllInstance ? _hdllInstance : AfxGetResourceHandle();
 }
 
+void CErksMainDialog::ForceTopLevelWindow()
+{
+    if (!GetSafeHwnd())
+        return;
+
+    // If the window is owned/parented by AutoCAD, caption buttons and sizing can be suppressed.
+    // Clearing GWLP_HWNDPARENT removes both parent/owner for top-level popup windows.
+    ::SetWindowLongPtr(GetSafeHwnd(), GWLP_HWNDPARENT, 0);
+}
+
 void CErksMainDialog::RefreshFrameStyles()
 {
     if (!GetSafeHwnd())
@@ -269,7 +282,7 @@ void CErksMainDialog::RefreshFrameStyles()
 
     LONG_PTR style = ::GetWindowLongPtr(GetSafeHwnd(), GWL_STYLE);
     style &= ~WS_CHILD;
-    style |= (WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME);
+    style |= (WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME | WS_SIZEBOX);
     style &= ~(DS_MODALFRAME);
     ::SetWindowLongPtr(GetSafeHwnd(), GWL_STYLE, style);
 
@@ -286,8 +299,20 @@ BOOL CErksMainDialog::OnInitDialog()
 {
     CAdUiDialog::OnInitDialog();
 
+    ErksRuntimeTrace::DumpWindowStyles(GetSafeHwnd(), L"Dialog Before ForceTopLevelWindow");
+
+    // Make it a true top-level window first, then apply frame styles.
+    ForceTopLevelWindow();
+    RefreshFrameStyles();
+
+    ErksRuntimeTrace::DumpWindowStyles(GetSafeHwnd(), L"Dialog After ForceTopLevelWindow");
+
     ErksPrint(L"%s", ERKS_BUILD_STAMP_W);
     ErksPrint(L"Resource FileVersion=%s", ERKS_FILE_VERSION_W);
+
+    ErksRuntimeTrace::DumpModuleIdentity(_hdllInstance, L"Dialog OnInit (_hdllInstance)");
+    ErksRuntimeTrace::DumpModuleIdentity((HMODULE)AfxGetResourceHandle(), L"Dialog OnInit (AfxGetResourceHandle)");
+    ErksRuntimeTrace::DumpWindowStyles(GetSafeHwnd(), L"Dialog OnInit");
 
     ErksPrint(L"OnInitDialog hwnd=%p", GetSafeHwnd());
 
@@ -307,21 +332,8 @@ BOOL CErksMainDialog::OnInitDialog()
 
     EnableImmersiveDarkTitleBar(GetSafeHwnd());
 
-    // Ensure menu is attached
-    if (GetMenu() == nullptr)
-    {
-        if (m_mainMenu.GetSafeHmenu() == nullptr)
-        {
-            BOOL okMenu = m_mainMenu.LoadMenu(IDM_ERKS_MAIN);
-            ErksPrint(L"LoadMenu(IDM_ERKS_MAIN)=%d hmenu=%p", (int)okMenu, m_mainMenu.GetSafeHmenu());
-        }
-
-        if (m_mainMenu.GetSafeHmenu())
-        {
-            SetMenu(&m_mainMenu);
-            DrawMenuBar();
-        }
-    }
+    // Do not attach a standard window menu; we draw our own menu strip.
+    // (Menu resource is still used for popup menus.)
 
     // Set title bar icon from embedded PNG
     HICON hSmall = CreateIconFromPngResource(ErksResourceHandle(), IDB_ERKS_LOGO_64, 16);
@@ -357,44 +369,20 @@ BOOL CErksMainDialog::OnInitDialog()
     SetDialogMinExtents(960, 540);
     SetDialogMaxExtents(4096, 4096);
 
-    // Do NOT force a fixed 2K size here; allow user resizing.
-    // Set a reasonable initial size once, then keep it resizable.
     SetWindowPos(nullptr, 0, 0, 1280, 720, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     CenterWindow();
+
+    // Host apps can tweak styles after init; re-apply once.
+    RefreshFrameStyles();
+    ErksRuntimeTrace::DumpWindowStyles(GetSafeHwnd(), L"Dialog After RefreshFrameStyles");
 
     return TRUE;
 }
 
 LRESULT CErksMainDialog::OnNcHitTest(CPoint point)
 {
-    LRESULT hit = CAdUiDialog::OnNcHitTest(point);
-
-    CRect rc;
-    GetWindowRect(&rc);
-
-    const int frameX = GetSystemMetrics(SM_CXSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
-    const int frameY = GetSystemMetrics(SM_CYSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
-
-    const bool left = point.x < rc.left + frameX;
-    const bool right = point.x >= rc.right - frameX;
-    const bool top = point.y < rc.top + frameY;
-    const bool bottom = point.y >= rc.bottom - frameY;
-
-    if (top && left) return HTTOPLEFT;
-    if (top && right) return HTTOPRIGHT;
-    if (bottom && left) return HTBOTTOMLEFT;
-    if (bottom && right) return HTBOTTOMRIGHT;
-    if (left) return HTLEFT;
-    if (right) return HTRIGHT;
-    if (top) return HTTOP;
-    if (bottom) return HTBOTTOM;
-
-    // If AutoCAD forces HTCLIENT everywhere, convert interior to caption so
-    // system menu, min/max and dragging behave like a normal top-level window.
-    if (hit == HTCLIENT)
-        return HTCAPTION;
-
-    return hit;
+    // Preserve default non-client hit testing so resize borders and caption buttons work.
+    return CAdUiDialog::OnNcHitTest(point);
 }
 
 void CErksMainDialog::OnSysCommand(UINT nID, LPARAM lParam)
@@ -476,7 +464,7 @@ void CErksMainDialog::OnFileExit()
 
 void CErksMainDialog::OnHelpAbout()
 {
-    AfxMessageBox(_T("Erk-S V1.0\n\nAbout"), MB_OK | MB_ICONINFORMATION);
+    AfxMessageBox(_T("Erk-S V1.0.0.0.1\n\nAbout"), MB_OK | MB_ICONINFORMATION);
 }
 
 void CErksMainDialog::OnInitMenuPopup(CMenu* pPopupMenu, UINT nIndex, BOOL bSysMenu)
@@ -556,24 +544,122 @@ void CErksMainDialog::OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT lpDrawItemStruct)
     dc.Detach();
 }
 
-BOOL CErksMainDialog::OnEraseBkgnd(CDC* pDC)
+void CErksMainDialog::RecalcMenuStripRects()
 {
-    const BOOL ret = CDialog::OnEraseBkgnd(pDC);
+    CRect rc;
+    GetClientRect(&rc);
 
-    // Attempt to darken the menu bar strip (where the top-level menu captions are)
-    if (pDC)
+    const int paddingX = 10;
+    const int gap = 6;
+
+    CClientDC dc(this);
+    CFont* oldFont = dc.SelectObject(GetFont());
+
+    const CString fileText = _T("File");
+    const CString aboutText = _T("About");
+
+    CSize fileSz = dc.GetTextExtent(fileText);
+    CSize aboutSz = dc.GetTextExtent(aboutText);
+
+    dc.SelectObject(oldFont);
+
+    const int y0 = 0;
+    const int y1 = m_menuStripHeight;
+
+    int x = paddingX;
+    m_rcMenuFile = CRect(x, y0, x + fileSz.cx + 24, y1);
+    x = m_rcMenuFile.right + gap;
+    m_rcMenuAbout = CRect(x, y0, x + aboutSz.cx + 24, y1);
+}
+
+void CErksMainDialog::DrawMenuStrip(CDC& dc)
+{
+    CRect rc;
+    GetClientRect(&rc);
+
+    CRect band = rc;
+    band.bottom = band.top + m_menuStripHeight;
+
+    dc.FillSolidRect(&band, m_backColor);
+
+    CFont* oldFont = dc.SelectObject(GetFont());
+    dc.SetBkMode(TRANSPARENT);
+    dc.SetTextColor(m_textColor);
+
+    auto drawItem = [&](const CRect& r, const TCHAR* text) {
+        CRect t = r;
+        dc.DrawText(text, -1, &t, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+    };
+
+    drawItem(m_rcMenuFile, _T("File"));
+    drawItem(m_rcMenuAbout, _T("About"));
+
+    dc.SelectObject(oldFont);
+}
+
+void CErksMainDialog::ShowTopMenuPopup(int topIndex, const CRect& rcItem)
+{
+    if (!m_mainMenu.GetSafeHmenu())
     {
-        CRect rcClient;
-        GetClientRect(&rcClient);
-
-        // Typical menu bar height is ~24px; using a conservative band.
-        CRect rcMenu = rcClient;
-        rcMenu.bottom = rcMenu.top + 28;
-
-        pDC->FillSolidRect(&rcMenu, m_backColor);
+        if (!m_mainMenu.LoadMenu(IDM_ERKS_MAIN))
+            return;
+        CaptureMenuText(&m_mainMenu);
+        ApplyOwnerDrawToMenu(&m_mainMenu);
     }
 
-    return ret;
+    CMenu* top = m_mainMenu.GetSubMenu(topIndex);
+    if (!top)
+        return;
+
+    CPoint pt(rcItem.left, rcItem.bottom);
+    ClientToScreen(&pt);
+
+    top->TrackPopupMenu(TPM_LEFTALIGN | TPM_TOPALIGN | TPM_LEFTBUTTON, pt.x, pt.y, this);
+}
+
+void CErksMainDialog::OnPaint()
+{
+    CPaintDC dc(this);
+
+    RecalcMenuStripRects();
+    DrawMenuStrip(dc);
+}
+
+void CErksMainDialog::OnLButtonDown(UINT nFlags, CPoint point)
+{
+    RecalcMenuStripRects();
+
+    if (m_rcMenuFile.PtInRect(point))
+    {
+        ShowTopMenuPopup(0, m_rcMenuFile);
+        return;
+    }
+
+    if (m_rcMenuAbout.PtInRect(point))
+    {
+        ShowTopMenuPopup(1, m_rcMenuAbout);
+        return;
+    }
+
+    CAdUiDialog::OnLButtonDown(nFlags, point);
+}
+
+void CErksMainDialog::OnNcLButtonDown(UINT nHitTest, CPoint point)
+{
+    // Let the default handler manage non-client interactions (sizing, system buttons).
+    CAdUiDialog::OnNcLButtonDown(nHitTest, point);
+}
+
+BOOL CErksMainDialog::OnEraseBkgnd(CDC* pDC)
+{
+    // Paint full client background dark; OnPaint draws the menu strip.
+    if (pDC)
+    {
+        CRect rc;
+        GetClientRect(&rc);
+        pDC->FillSolidRect(&rc, m_backColor);
+    }
+    return TRUE;
 }
 
 void CErksMainDialog::PostNcDestroy()
@@ -614,25 +700,5 @@ void CErksMainDialog::OnGetMinMaxInfo(MINMAXINFO* lpMMI)
 void CErksMainDialog::OnSize(UINT nType, int cx, int cy)
 {
     CAdUiDialog::OnSize(nType, cx, cy);
-
-    if (GetSafeHwnd() && GetMenu())
-        DrawMenuBar();
-}
-
-void CErksMainDialog::OnNcLButtonDown(UINT nHitTest, CPoint point)
-{
-    switch (nHitTest)
-    {
-    case HTLEFT: case HTRIGHT: case HTTOP: case HTBOTTOM:
-    case HTTOPLEFT: case HTTOPRIGHT: case HTBOTTOMLEFT: case HTBOTTOMRIGHT:
-        SendMessage(WM_SYSCOMMAND, SC_SIZE + nHitTest, MAKELPARAM(point.x, point.y));
-        return;
-    case HTCAPTION:
-        SendMessage(WM_SYSCOMMAND, SC_MOVE | HTCAPTION, MAKELPARAM(point.x, point.y));
-        return;
-    default:
-        break;
-    }
-
-    CAdUiDialog::OnNcLButtonDown(nHitTest, point);
+    Invalidate(FALSE);
 }

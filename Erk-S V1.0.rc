@@ -84,7 +84,7 @@ END
 
 STRINGTABLE DISCARDABLE 
 BEGIN
-	IDS_PROJNAME					"Erk-S V1.0"
+	IDS_PROJNAME					"Erk-S"
 END
 
 
@@ -107,7 +107,6 @@ END
 //
 
 IDB_ERKS_LOGO_64           PNG                     "Images\\Erk-S_logo-64x64.png"
-IDB_ERKS_INTRO_PNG          PNG                     "Images\\Intro.png"
 IDB_ERKS_LOGO_100           PNG                     "Images\\Erk-S_logo-100x100.png"
 
 /////////////////////////////////////////////////////////////////////////////
@@ -141,13 +140,102 @@ END
 
 IDD_ERKS_MAIN DIALOGEX 0, 0, 2560, 1440
 STYLE DS_SETFONT | WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_SIZEBOX | WS_MINIMIZEBOX | WS_MAXIMIZEBOX
-CAPTION "Erk-S V1.0"
-MENU IDM_ERKS_MAIN
+CAPTION "Erk-S"
 FONT 9, "Segoe UI", 0, 0, 0x0
 BEGIN
 END
 
 #endif    // !_MAC
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
