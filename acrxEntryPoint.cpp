@@ -145,7 +145,7 @@ public:
 //-----------------------------------------------------------------------------
 IMPLEMENT_ARX_ENTRYPOINT(CErkSV10App)
 
-ACED_ARXCOMMAND_ENTRY_AUTO(CErkSV10App, ErksMyGroup, Erks, Erks, ACRX_CMD_MODAL, NULL)
+ACED_ARXCOMMAND_ENTRY_AUTO(CErkSV10App, ErksMyGroup, Erks, Erks, ACRX_CMD_MODAL | ACRX_CMD_SESSION, NULL)
 ACED_ARXCOMMAND_ENTRY_AUTO(CErkSV10App, ErksMyGroup, MyCommand, MyCommandLocal, ACRX_CMD_MODAL, NULL)
 ACED_ARXCOMMAND_ENTRY_AUTO(CErkSV10App, ErksMyGroup, MyPickFirst, MyPickFirstLocal, ACRX_CMD_MODAL | ACRX_CMD_USEPICKSET, NULL)
 ACED_ARXCOMMAND_ENTRY_AUTO(CErkSV10App, ErksMyGroup, MySessionCmd, MySessionCmdLocal, ACRX_CMD_MODAL | ACRX_CMD_SESSION, NULL)

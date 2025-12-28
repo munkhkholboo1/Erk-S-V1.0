@@ -1,11 +1,12 @@
 #pragma once
 
 #include <afxwin.h>
+#include <aduiDialog.h>
 #include <unordered_map>
 #include <string>
 #include "Resource.h"
 
-class CErksMainDialog : public CDialog
+class CErksMainDialog : public CAdUiDialog
 {
 public:
     explicit CErksMainDialog(CWnd* pParent = nullptr);
@@ -24,6 +25,10 @@ protected:
     afx_msg void OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT lpDrawItemStruct);
     afx_msg void OnInitMenuPopup(CMenu* pPopupMenu, UINT nIndex, BOOL bSysMenu);
     afx_msg void OnClose();
+    afx_msg void OnGetMinMaxInfo(MINMAXINFO* lpMMI);
+    afx_msg void OnSize(UINT nType, int cx, int cy);
+    afx_msg LRESULT OnNcHitTest(CPoint point);
+    afx_msg void OnSysCommand(UINT nID, LPARAM lParam);
 
     DECLARE_MESSAGE_MAP()
 

@@ -60,8 +60,12 @@ void CErksUiController::ShowUi(CWnd* pParent)
         return;
     }
 
-    m_dlg = new CErksMainDialog(pParent);
-    if (!m_dlg->Create(CErksMainDialog::IDD, pParent))
+    // Create as a top-level tool window instead of parenting to AutoCAD frame;
+    // parenting can cause AutoCAD to suppress sizing and min/max behaviors.
+    UNREFERENCED_PARAMETER(pParent);
+
+    m_dlg = new CErksMainDialog(nullptr);
+    if (!m_dlg->Create(CErksMainDialog::IDD, nullptr))
     {
         delete m_dlg;
         m_dlg = nullptr;

@@ -6,17 +6,34 @@
 #include <wincodec.h>
 #pragma comment(lib, "dwmapi.lib")
 
-BEGIN_MESSAGE_MAP(CErksMainDialog, CDialog)
+extern HINSTANCE _hdllInstance;
+
+static void ErksPrint(const wchar_t* fmt, ...)
+{
+    wchar_t buf[1024];
+    va_list args;
+    va_start(args, fmt);
+    _vsnwprintf_s(buf, _countof(buf), _TRUNCATE, fmt, args);
+    va_end(args);
+
+    acutPrintf(L"\n[ERKS UI] %s", buf);
+}
+
+BEGIN_MESSAGE_MAP(CErksMainDialog, CAdUiDialog)
     ON_WM_CTLCOLOR()
     ON_WM_ERASEBKGND()
     ON_WM_MEASUREITEM()
     ON_WM_DRAWITEM()
     ON_WM_INITMENUPOPUP()
     ON_WM_CLOSE()
+    ON_WM_GETMINMAXINFO()
+    ON_WM_SIZE()
+    ON_WM_NCHITTEST()
+    ON_WM_SYSCOMMAND()
 END_MESSAGE_MAP()
 
 CErksMainDialog::CErksMainDialog(CWnd* pParent)
-    : CDialog(CErksMainDialog::IDD, pParent)
+    : CAdUiDialog(CErksMainDialog::IDD, pParent)
 {
 }
 
@@ -237,31 +254,56 @@ static HICON CreateIconFromPngResource(HINSTANCE hInst, UINT pngResId, int sizeP
     return hIcon;
 }
 
+// Helper to get the correct module resource handle (ARX)
+static HINSTANCE ErksResourceHandle()
+{
+    return _hdllInstance ? _hdllInstance : AfxGetResourceHandle();
+}
+
 BOOL CErksMainDialog::OnInitDialog()
 {
-    CDialog::OnInitDialog();
+    CAdUiDialog::OnInitDialog();
+
+    ErksPrint(L"OnInitDialog hwnd=%p", GetSafeHwnd());
 
     // Force-remove any default buttons if they exist
     if (CWnd* ok = GetDlgItem(IDOK))
+    {
+        ErksPrint(L"Found IDOK hwnd=%p -> destroying", ok->GetSafeHwnd());
         ok->DestroyWindow();
+    }
     if (CWnd* cancel = GetDlgItem(IDCANCEL))
+    {
+        ErksPrint(L"Found IDCANCEL hwnd=%p -> destroying", cancel->GetSafeHwnd());
         cancel->DestroyWindow();
+    }
 
-    // Ensure we have a normal resizable top-level window with caption buttons
-    LONG_PTR style = ::GetWindowLongPtr(GetSafeHwnd(), GWL_STYLE);
-    style |= (WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME);
-    style &= ~(DS_MODALFRAME);
-    ::SetWindowLongPtr(GetSafeHwnd(), GWL_STYLE, style);
+    // Re-enable caption buttons and resizing (AutoCAD/AdUi may alter these)
+    // Also ensure it's not a child window; child windows cannot be minimized/maximized.
+    LONG_PTR dlgStyle = ::GetWindowLongPtr(GetSafeHwnd(), GWL_STYLE);
+    dlgStyle &= ~WS_CHILD;
+    dlgStyle |= (WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_THICKFRAME);
+    dlgStyle &= ~(DS_MODALFRAME);
+    ::SetWindowLongPtr(GetSafeHwnd(), GWL_STYLE, dlgStyle);
+
+    LONG_PTR exStyle = ::GetWindowLongPtr(GetSafeHwnd(), GWL_EXSTYLE);
+    exStyle |= WS_EX_APPWINDOW;
+    exStyle &= ~WS_EX_TOOLWINDOW;
+    ::SetWindowLongPtr(GetSafeHwnd(), GWL_EXSTYLE, exStyle);
+
     ::SetWindowPos(GetSafeHwnd(), nullptr, 0, 0, 0, 0,
         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE);
 
     EnableImmersiveDarkTitleBar(GetSafeHwnd());
 
-    // Ensure menu is attached (modeless Create() sometimes won't show it automatically)
+    // Ensure menu is attached
     if (GetMenu() == nullptr)
     {
         if (m_mainMenu.GetSafeHmenu() == nullptr)
-            m_mainMenu.LoadMenu(IDM_ERKS_MAIN);
+        {
+            BOOL okMenu = m_mainMenu.LoadMenu(IDM_ERKS_MAIN);
+            ErksPrint(L"LoadMenu(IDM_ERKS_MAIN)=%d hmenu=%p", (int)okMenu, m_mainMenu.GetSafeHmenu());
+        }
 
         if (m_mainMenu.GetSafeHmenu())
         {
@@ -271,12 +313,19 @@ BOOL CErksMainDialog::OnInitDialog()
     }
 
     // Set title bar icon from embedded PNG
-    HICON hSmall = CreateIconFromPngResource(AfxGetResourceHandle(), IDB_ERKS_LOGO_100, 32);
-    HICON hBig = CreateIconFromPngResource(AfxGetResourceHandle(), IDB_ERKS_LOGO_100, 64);
+    HICON hSmall = CreateIconFromPngResource(ErksResourceHandle(), IDB_ERKS_LOGO_64, 16);
+    HICON hBig = CreateIconFromPngResource(ErksResourceHandle(), IDB_ERKS_LOGO_64, 32);
+    ErksPrint(L"CreateIcon small=%p big=%p", (void*)hSmall, (void*)hBig);
     if (hSmall)
+    {
         SendMessage(WM_SETICON, ICON_SMALL, (LPARAM)hSmall);
+        ::SetClassLongPtr(GetSafeHwnd(), GCLP_HICONSM, (LONG_PTR)hSmall);
+    }
     if (hBig)
+    {
         SendMessage(WM_SETICON, ICON_BIG, (LPARAM)hBig);
+        ::SetClassLongPtr(GetSafeHwnd(), GCLP_HICON, (LONG_PTR)hBig);
+    }
 
     if (m_darkBrush.GetSafeHandle() == nullptr)
         m_darkBrush.CreateSolidBrush(m_backColor);
@@ -293,11 +342,70 @@ BOOL CErksMainDialog::OnInitDialog()
     if (!title.IsEmpty())
         SetWindowText(title);
 
-    // Set initial size (2K)
-    SetWindowPos(nullptr, 0, 0, 2560, 1440, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    // AutoCAD-supported sizing: initial size + elastic extents (enables resizing)
+    SetDialogMinExtents(960, 540);
+    SetDialogMaxExtents(4096, 4096);
+
+    // Do NOT force a fixed 2K size here; allow user resizing.
+    // Set a reasonable initial size once, then keep it resizable.
+    SetWindowPos(nullptr, 0, 0, 1280, 720, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     CenterWindow();
 
     return TRUE;
+}
+
+LRESULT CErksMainDialog::OnNcHitTest(CPoint point)
+{
+    LRESULT hit = CAdUiDialog::OnNcHitTest(point);
+
+    CRect rc;
+    GetWindowRect(&rc);
+
+    const int frameX = GetSystemMetrics(SM_CXSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+    const int frameY = GetSystemMetrics(SM_CYSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+
+    const bool left = point.x < rc.left + frameX;
+    const bool right = point.x >= rc.right - frameX;
+    const bool top = point.y < rc.top + frameY;
+    const bool bottom = point.y >= rc.bottom - frameY;
+
+    if (top && left) return HTTOPLEFT;
+    if (top && right) return HTTOPRIGHT;
+    if (bottom && left) return HTBOTTOMLEFT;
+    if (bottom && right) return HTBOTTOMRIGHT;
+    if (left) return HTLEFT;
+    if (right) return HTRIGHT;
+    if (top) return HTTOP;
+    if (bottom) return HTBOTTOM;
+
+    // If AutoCAD forces HTCLIENT everywhere, convert interior to caption so
+    // system menu, min/max and dragging behave like a normal top-level window.
+    if (hit == HTCLIENT)
+        return HTCAPTION;
+
+    return hit;
+}
+
+void CErksMainDialog::OnSysCommand(UINT nID, LPARAM lParam)
+{
+    const UINT cmd = (nID & 0xFFF0);
+
+    switch (cmd)
+    {
+    case SC_MINIMIZE:
+        ShowWindow(SW_MINIMIZE);
+        return;
+    case SC_MAXIMIZE:
+        ShowWindow(SW_MAXIMIZE);
+        return;
+    case SC_RESTORE:
+        ShowWindow(SW_RESTORE);
+        return;
+    default:
+        break;
+    }
+
+    CAdUiDialog::OnSysCommand(nID, lParam);
 }
 
 HBRUSH CErksMainDialog::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
@@ -477,4 +585,25 @@ void CErksMainDialog::OnCancel()
 void CErksMainDialog::OnClose()
 {
     DestroyWindow();
+}
+
+void CErksMainDialog::OnGetMinMaxInfo(MINMAXINFO* lpMMI)
+{
+    CAdUiDialog::OnGetMinMaxInfo(lpMMI);
+    if (!lpMMI)
+        return;
+
+    lpMMI->ptMinTrackSize.x = 960;
+    lpMMI->ptMinTrackSize.y = 540;
+
+    lpMMI->ptMaxTrackSize.x = 4096;
+    lpMMI->ptMaxTrackSize.y = 4096;
+}
+
+void CErksMainDialog::OnSize(UINT nType, int cx, int cy)
+{
+    CAdUiDialog::OnSize(nType, cx, cy);
+
+    if (GetSafeHwnd() && GetMenu())
+        DrawMenuBar();
 }
