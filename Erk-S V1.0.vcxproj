@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|x64">
@@ -15,6 +15,7 @@
     <ClCompile Include="DocData.cpp" />
     <ClCompile Include="Erk-S V1.0.cpp" />
     <ClCompile Include="ErksMainDialog.cpp" />
+    <ClCompile Include="ErksMapPreviewWnd.cpp" />
     <ClCompile Include="ErksPopupMenuWnd.cpp" />
     <ClCompile Include="ErksRuntimeTrace.cpp" />
     <ClCompile Include="ErksUiController.cpp" />
@@ -26,6 +27,7 @@
   <ItemGroup>
     <ClInclude Include="DocData.h" />
     <ClInclude Include="ErksMainDialog.h" />
+    <ClInclude Include="ErksMapPreviewWnd.h" />
     <ClInclude Include="ErksPopupMenuWnd.h" />
     <ClInclude Include="ErksRuntimeTrace.h" />
     <ClInclude Include="ErksUiController.h" />
@@ -93,6 +95,24 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Use</PrecompiledHeader>
     </ClCompile>
     <Link>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>packages\\Microsoft.Web.WebView2.1.0.2210.55\\build\\native\\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <AdditionalLibraryDirectories>packages\\Microsoft.Web.WebView2.1.0.2210.55\\build\\native\\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>WebView2Loader.dll.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(ProjectDir)packages\\Microsoft.Web.WebView2.1.0.2210.55\\build\\native\\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <AdditionalLibraryDirectories>$(ProjectDir)packages\\Microsoft.Web.WebView2.1.0.2210.55\\build\\native\\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>WebView2Loader.dll.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

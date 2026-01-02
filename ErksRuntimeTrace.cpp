@@ -27,18 +27,37 @@ namespace ErksRuntimeTrace
         if (!hmod)
             hmod = ::GetModuleHandleW(nullptr);
 
+        auto tryGet = [](HMODULE m, std::wstring& out) -> DWORD {
+            out.resize(32768);
+            DWORD n = ::GetModuleFileNameW(m, &out[0], (DWORD)out.size());
+            if (n == 0)
+                return ::GetLastError();
+            out.resize(n);
+            return ERROR_SUCCESS;
+        };
+
         std::wstring out;
-        out.resize(32768);
-        DWORD n = ::GetModuleFileNameW(hmod, &out[0], (DWORD)out.size());
-        if (n == 0)
+        DWORD err = tryGet(hmod, out);
+        if (err == ERROR_SUCCESS)
+            return out;
+
+        if (err == ERROR_MOD_NOT_FOUND || err == ERROR_INVALID_HANDLE)
         {
-            const DWORD err = ::GetLastError();
-            wchar_t msg[128];
-            _snwprintf_s(msg, _countof(msg), _TRUNCATE, L"<GetModuleFileNameW failed err=%lu>", (unsigned long)err);
-            return msg;
+            // Caller passed something that's not a module handle (common when an object pointer is cast to HMODULE).
+            // Fall back to the current process module path to avoid noisy logs.
+            std::wstring fallback;
+            DWORD err2 = tryGet(::GetModuleHandleW(nullptr), fallback);
+            if (err2 == ERROR_SUCCESS)
+            {
+                wchar_t msg[128];
+                _snwprintf_s(msg, _countof(msg), _TRUNCATE, L"<invalid module handle %p; using host '%ls'>", hmod, fallback.c_str());
+                return msg;
+            }
         }
-        out.resize(n);
-        return out;
+
+        wchar_t msg[128];
+        _snwprintf_s(msg, _countof(msg), _TRUNCATE, L"<GetModuleFileNameW failed err=%lu>", (unsigned long)err);
+        return msg;
     }
 
     bool GetFileVersionString(const std::wstring& filePath, std::wstring& outVersion)

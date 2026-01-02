@@ -5,6 +5,12 @@
 #include "ErksRuntimeTrace.h"
 #include "ErksPopupMenuWnd.h"
 
+#include <algorithm>
+#include <cmath>
+#include <memory>
+#include <sstream>
+#include <iomanip>
+
 static std::vector<ErksPopupMenuItem> BuildPopupModel(CMenu* menu, CErksMainDialog* dlg);
 
 #include <dwmapi.h>
@@ -355,6 +361,14 @@ BOOL CErksMainDialog::OnInitDialog()
     if (m_darkBrush.GetSafeHandle() == nullptr)
         m_darkBrush.CreateSolidBrush(m_backColor);
 
+    // Create legacy preview panel (visible by default)
+    if (!m_mapPreview.GetSafeHwnd())
+    {
+        m_mapPreview.Create(this);
+        m_mapPreview.SetTheme(m_backColor, m_borderColor, m_textColor);
+        m_mapPreview.ShowWindow(SW_SHOW);
+    }
+
     if (CMenu* menu = GetMenu())
     {
         CaptureMenuText(menu);
@@ -446,18 +460,10 @@ BOOL CErksMainDialog::OnCommand(WPARAM wParam, LPARAM lParam)
     }
 }
 
-static void ShowNotImplemented(LPCTSTR what)
-{
-    CString msg;
-    msg.Format(_T("%s - not implemented yet."), what);
-    AfxMessageBox(msg, MB_OK | MB_ICONINFORMATION);
-}
-
-void CErksMainDialog::OnFileOpen() { ShowNotImplemented(_T("Open")); }
-void CErksMainDialog::OnFileSave() { ShowNotImplemented(_T("Save")); }
-void CErksMainDialog::OnFileSaveAs() { ShowNotImplemented(_T("Save As")); }
-void CErksMainDialog::OnFileOpenExistingData() { ShowNotImplemented(_T("Open Existing Data")); }
-void CErksMainDialog::OnFileCreateRoadAxis() { ShowNotImplemented(_T("Create Road Axis")); }
+void CErksMainDialog::OnFileOpen() { }
+void CErksMainDialog::OnFileSave() { }
+void CErksMainDialog::OnFileSaveAs() { }
+void CErksMainDialog::OnFileCreateRoadAxis() { }
 
 void CErksMainDialog::OnFileExit()
 {
@@ -503,9 +509,12 @@ void CErksMainDialog::OnMeasureItem(int nIDCtl, LPMEASUREITEMSTRUCT lpMeasureIte
     CSize sz = dc.GetTextExtent(text.c_str());
     dc.SelectObject(oldFont);
 
-    const UINT desiredHeight = (UINT)sz.cy + 10;
-    lpMeasureItemStruct->itemHeight = (desiredHeight > 22u) ? desiredHeight : 22u;
-    lpMeasureItemStruct->itemWidth = (UINT)sz.cx + 28;
+    // Match the popup menu's item height calculation: max(18, fontH + 4)
+    const UINT desiredHeight = (UINT)sz.cy + 4;
+    lpMeasureItemStruct->itemHeight = (desiredHeight > 18u) ? desiredHeight : 18u;
+    
+    // Match the popup menu's width calculation: textWidth + 50 (for padding and margins)
+    lpMeasureItemStruct->itemWidth = (UINT)sz.cx + 50;
 }
 
 void CErksMainDialog::OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT lpDrawItemStruct)
@@ -570,6 +579,7 @@ void CErksMainDialog::OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT lpDrawItemStruct)
 
     CFont* oldFont = dc.SelectObject(GetFont());
 
+    // Use the same padding as the popup menu (paddingX = 12)
     rc.DeflateRect(12, 0);
     dc.DrawText(caption.c_str(), (int)caption.size(), &rc, DT_SINGLELINE | DT_VCENTER | DT_LEFT);
 
@@ -740,6 +750,22 @@ void CErksMainDialog::OnGetMinMaxInfo(MINMAXINFO* lpMMI)
 void CErksMainDialog::OnSize(UINT nType, int cx, int cy)
 {
     CAdUiDialog::OnSize(nType, cx, cy);
+
+    const int margin = 12;
+    const int top = m_menuStripHeight + margin;
+    const int bottom = margin;
+
+    int w = cx - (margin * 2);
+    int h = cy - top - bottom;
+    if (w < 0) w = 0;
+    if (h < 0) h = 0;
+
+    if (m_mapPreview.GetSafeHwnd())
+    {
+        m_mapPreview.ShowWindow(SW_SHOW);
+        m_mapPreview.SetWindowPos(nullptr, margin, top, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+
     Invalidate(FALSE);
 }
 
@@ -803,4 +829,249 @@ const std::wstring* CErksMainDialog::TryGetMenuText(UINT id) const
     if (it == m_menuTextById.end())
         return nullptr;
     return &it->second;
+}
+
+static bool ErksLayerEquals(const ACHAR* a, const wchar_t* b)
+{
+    if (!a || !b) return false;
+    CStringW wa(a);
+    wa.MakeLower();
+    CStringW wb(b);
+    wb.MakeLower();
+    return wa == wb;
+}
+
+static void AddSegment(CErksMapPreviewWnd::Polyline2d& pl, const AcGePoint3d& p)
+{
+    pl.pts.push_back(CErksMapPreviewWnd::PointF((float)p.x, (float)p.y));
+}
+
+static void AddArcApprox(CErksMapPreviewWnd::Polyline2d& pl, const AcGePoint3d& center, double radius, double startAng, double endAng, int steps)
+{
+    if (steps < 4) steps = 4;
+
+    double da = endAng - startAng;
+    while (da <= 0.0) da += (2.0 * 3.14159265358979323846);
+
+    for (int i = 0; i <= steps; ++i)
+    {
+        const double t = (double)i / (double)steps;
+        const double a = startAng + (da * t);
+        const double x = center.x + radius * cos(a);
+        const double y = center.y + radius * sin(a);
+        pl.pts.push_back(CErksMapPreviewWnd::PointF((float)x, (float)y));
+    }
+}
+
+static void AddCircleApprox(CErksMapPreviewWnd::Polyline2d& pl, const AcGePoint3d& center, double radius, int steps)
+{
+    if (steps < 8) steps = 8;
+    for (int i = 0; i < steps; ++i)
+    {
+        const double a = (2.0 * 3.14159265358979323846) * ((double)i / (double)steps);
+        const double x = center.x + radius * cos(a);
+        const double y = center.y + radius * sin(a);
+        pl.pts.push_back(CErksMapPreviewWnd::PointF((float)x, (float)y));
+    }
+    pl.closed = true;
+}
+
+static bool ExtractEntityAsPolyline(const AcDbEntity* ent, CErksMapPreviewWnd::Polyline2d& out)
+{
+    if (!ent)
+        return false;
+
+    if (const AcDbLine* ln = AcDbLine::cast(ent))
+    {
+        AddSegment(out, ln->startPoint());
+        AddSegment(out, ln->endPoint());
+        return true;
+    }
+
+    if (const AcDbArc* arc = AcDbArc::cast(ent))
+    {
+        const double r = arc->radius();
+        const double sweep = arc->endAngle() - arc->startAngle();
+        const int steps = std::max(12, (int)std::ceil(std::abs(sweep) / (3.14159265358979323846 / 18.0))); // ~10 deg
+        AddArcApprox(out, arc->center(), r, arc->startAngle(), arc->endAngle(), steps);
+        return true;
+    }
+
+    if (const AcDbCircle* cir = AcDbCircle::cast(ent))
+    {
+        AddCircleApprox(out, cir->center(), cir->radius(), 72);
+        return true;
+    }
+
+    if (const AcDbPolyline* pl = AcDbPolyline::cast(ent))
+    {
+        const int n = pl->numVerts();
+        if (n <= 0)
+            return false;
+
+        for (int i = 0; i < n; ++i)
+        {
+            AcGePoint3d p;
+            pl->getPointAt(i, p);
+            out.pts.push_back(CErksMapPreviewWnd::PointF((float)p.x, (float)p.y));
+        }
+
+        out.closed = pl->isClosed();
+        return true;
+    }
+
+    if (const AcDb2dPolyline* pl2 = AcDb2dPolyline::cast(ent))
+    {
+        AcDbObjectIterator* it = pl2->vertexIterator();
+        if (!it) return false;
+
+        std::unique_ptr<AcDbObjectIterator> itGuard(it);
+
+        for (; !it->done(); it->step())
+        {
+            AcDbObjectId vid = it->objectId();
+            AcDbObject* obj = nullptr;
+            if (acdbOpenObject(obj, vid, AcDb::kForRead) != Acad::eOk || !obj)
+                continue;
+
+            AcDb2dVertex* v = AcDb2dVertex::cast(obj);
+            if (v)
+            {
+                const AcGePoint3d p = v->position();
+                out.pts.push_back(CErksMapPreviewWnd::PointF((float)p.x, (float)p.y));
+            }
+            obj->close();
+        }
+
+        out.closed = pl2->isClosed();
+        return out.pts.size() >= 2;
+    }
+
+    if (const AcDbSpline* sp = AcDbSpline::cast(ent))
+    {
+        // Sample spline by parameter (portable across ARX versions)
+        const int steps = 64;
+        double startP = 0.0, endP = 1.0;
+        if (sp->getStartParam(startP) == Acad::eOk && sp->getEndParam(endP) == Acad::eOk)
+        {
+            for (int i = 0; i <= steps; ++i)
+            {
+                const double t = startP + (endP - startP) * ((double)i / (double)steps);
+                AcGePoint3d p;
+                if (sp->getPointAtParam(t, p) == Acad::eOk)
+                    out.pts.push_back(CErksMapPreviewWnd::PointF((float)p.x, (float)p.y));
+            }
+            return out.pts.size() >= 2;
+        }
+
+        return false;
+    }
+
+    return false;
+}
+
+void CErksMainDialog::OnFileOpenExistingData()
+{
+    CFileDialog dlg(TRUE, _T("dwg"), nullptr,
+        OFN_FILEMUSTEXIST | OFN_HIDEREADONLY,
+        _T("AutoCAD Drawing (*.dwg)|*.dwg|All Files (*.*)|*.*||"),
+        this);
+
+    if (dlg.DoModal() != IDOK)
+        return;
+
+    const CString path = dlg.GetPathName();
+    if (path.IsEmpty())
+        return;
+
+    std::unique_ptr<AcDbDatabase> db(new AcDbDatabase(false, true));
+
+    const Acad::ErrorStatus esRead = db->readDwgFile((LPCTSTR)path);
+    if (esRead != Acad::eOk)
+    {
+        CString msg;
+        msg.Format(_T("Failed to read DWG: %s (Error %d)"), path.GetString(), (int)esRead);
+        AfxMessageBox(msg, MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    // Compute extents
+    db->updateExt();
+    const AcGePoint3d mn = db->extmin();
+    const AcGePoint3d mx = db->extmax();
+
+    ErksPrint(L"DWG extents min=(%.3f,%.3f) max=(%.3f,%.3f)", mn.x, mn.y, mx.x, mx.y);
+
+    // --- Extract entities for legacy preview
+
+    AcDbBlockTable* bt = nullptr;
+    if (db->getBlockTable(bt, AcDb::kForRead) != Acad::eOk || !bt)
+    {
+        AfxMessageBox(_T("Failed to open block table."), MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    AcDbBlockTableRecord* ms = nullptr;
+    if (bt->getAt(ACDB_MODEL_SPACE, ms, AcDb::kForRead) != Acad::eOk || !ms)
+    {
+        bt->close();
+        AfxMessageBox(_T("Failed to open model space."), MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    bt->close();
+
+    std::vector<CErksMapPreviewWnd::Polyline2d> polys;
+
+    bool foundMinor = false;
+    bool foundMajor = false;
+
+    AcDbBlockTableRecordIterator* it = nullptr;
+    if (ms->newIterator(it) != Acad::eOk || !it)
+    {
+        ms->close();
+        AfxMessageBox(_T("Failed to iterate model space."), MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    std::unique_ptr<AcDbBlockTableRecordIterator> itGuard(it);
+
+    for (; !it->done(); it->step())
+    {
+        AcDbEntity* ent = nullptr;
+        if (it->getEntity(ent, AcDb::kForRead) != Acad::eOk || !ent)
+            continue;
+
+        const ACHAR* layer = ent->layer();
+        const bool isMinor = ErksLayerEquals(layer, L"minor");
+        const bool isMajor = ErksLayerEquals(layer, L"major");
+
+        if (!isMinor && !isMajor)
+        {
+            ent->close();
+            continue;
+        }
+
+        if (isMinor) foundMinor = true;
+        if (isMajor) foundMajor = true;
+
+        CErksMapPreviewWnd::Polyline2d pl;
+        pl.color = isMajor ? RGB(230, 230, 230) : RGB(160, 160, 160);
+
+        const bool ok = ExtractEntityAsPolyline(ent, pl);
+        ent->close();
+
+        if (!(ok && pl.pts.size() >= 2))
+            continue;
+
+        polys.push_back(pl);
+    }
+
+    ms->close();
+
+    if (m_mapPreview.GetSafeHwnd())
+        m_mapPreview.SetGeometry(polys);
+
+    if (!foundMinor && !foundMajor)
+        AfxMessageBox(_T("No entities found on layers 'minor' or 'major'."), MB_OK | MB_ICONWARNING);
 }

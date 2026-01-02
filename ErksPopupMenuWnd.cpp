@@ -1,6 +1,10 @@
 #include "StdAfx.h"
 #include "ErksPopupMenuWnd.h"
 
+#include <algorithm>
+
+#include <uxtheme.h>
+
 BEGIN_MESSAGE_MAP(CErksPopupMenuWnd, CWnd)
     ON_WM_PAINT()
     ON_WM_MOUSEMOVE()
@@ -31,45 +35,42 @@ UINT CErksPopupMenuWnd::Track(CWnd* owner, const CPoint& screenPt, const std::ve
     m_hover = -1;
     m_result = 0;
 
+    if (!owner)
+        return 0;
+
     CString cls = AfxRegisterWndClass(CS_DBLCLKS, ::LoadCursor(nullptr, IDC_ARROW), (HBRUSH)GetStockObject(NULL_BRUSH), nullptr);
 
-    // Prepare a font slightly smaller than the owner font to match typical menu sizing.
-    static CFont s_popupFont;
-    static HFONT s_lastOwnerFont = nullptr;
+    // Use the system *menu* font (same one used by File/About).
+    // Must outlive the popup window; do not use a local CFont wrapper.
+    static CFont s_menuFont;
+    static bool s_menuFontInit = false;
 
-    // Use the exact same font as the owner to match File/About.
-    if (owner && owner->GetFont())
+    if (!s_menuFontInit)
     {
-        if (s_popupFont.GetSafeHandle())
-            s_popupFont.DeleteObject();
-        LOGFONT lf{};
-        HFONT hOwnerFont = (HFONT)owner->GetFont()->GetSafeHandle();
-        if (hOwnerFont && ::GetObject(hOwnerFont, sizeof(lf), &lf) == sizeof(lf))
+        NONCLIENTMETRICS ncm{};
+        ncm.cbSize = sizeof(NONCLIENTMETRICS);
+        if (SystemParametersInfo(SPI_GETNONCLIENTMETRICS, ncm.cbSize, &ncm, 0))
         {
-            lf.lfWeight = FW_NORMAL;
-            s_popupFont.CreateFontIndirect(&lf);
+            s_menuFont.CreateFontIndirect(&ncm.lfMenuFont);
         }
+        s_menuFontInit = true;
     }
 
-    // Pick font for measuring.
-    CFont* fontToUse = (s_popupFont.GetSafeHandle() != nullptr) ? &s_popupFont : (owner ? owner->GetFont() : nullptr);
+    CFont* fontToUse = s_menuFont.GetSafeHandle() ? &s_menuFont : (CFont*)CFont::FromHandle((HFONT)::GetStockObject(DEFAULT_GUI_FONT));
 
     CClientDC dc(owner);
-    CFont* oldFont = nullptr;
-    if (fontToUse)
-        oldFont = dc.SelectObject(fontToUse);
-    else
-        oldFont = (CFont*)dc.SelectStockObject(DEFAULT_GUI_FONT);
+    CFont* oldFont = dc.SelectObject(fontToUse);
 
     const int w = CalcWidth(dc);
 
     TEXTMETRIC tm{};
     dc.GetTextMetrics(&tm);
-    dc.SelectObject(oldFont);
+    if (oldFont)
+        dc.SelectObject(oldFont);
 
     const int fontH = tm.tmHeight;
-    m_itemHeight = max(18, fontH + 4);
-    m_sepHeight = max(8, (fontH / 2) + 4);
+    m_itemHeight = std::max(18, fontH + 4);
+    m_sepHeight = std::max(8, (fontH / 2) + 4);
 
     const int h = TotalHeight();
 
@@ -79,14 +80,10 @@ UINT CErksPopupMenuWnd::Track(CWnd* owner, const CPoint& screenPt, const std::ve
     if (!CreateEx(exStyle, cls, _T("ERKS_POPUP_MENU"), style, CRect(screenPt.x, screenPt.y, screenPt.x + w, screenPt.y + h), owner, 0))
         return 0;
 
-    // Apply the font after window creation so WM_SETFONT reaches the window.
-    if (fontToUse)
-        SetFont(fontToUse, FALSE);
+    SetFont(fontToUse, FALSE);
 
     ShowWindow(SW_SHOWNOACTIVATE);
     UpdateWindow();
-
-    // Avoid SetFocus/SetCapture: AutoCAD can steal focus/capture immediately.
 
     m_running = true;
 
@@ -99,8 +96,8 @@ UINT CErksPopupMenuWnd::Track(CWnd* owner, const CPoint& screenPt, const std::ve
             POINT pt{ GET_X_LPARAM(msg.lParam), GET_Y_LPARAM(msg.lParam) };
             // For non-client/global messages lParam may not be screen; use cursor position.
             ::GetCursorPos(&pt);
-            HWND h = ::WindowFromPoint(pt);
-            if (h != GetSafeHwnd() && !::IsChild(GetSafeHwnd(), h))
+            HWND hWnd = ::WindowFromPoint(pt);
+            if (hWnd != GetSafeHwnd() && !::IsChild(GetSafeHwnd(), hWnd))
             {
                 End(0);
                 continue;
@@ -121,7 +118,8 @@ void CErksPopupMenuWnd::End(UINT cmd)
 {
     m_result = cmd;
     m_running = false;
-    PostMessage(WM_NULL);
+    if (GetSafeHwnd())
+        PostMessage(WM_NULL);
 }
 
 int CErksPopupMenuWnd::ItemHeight(int index) const
@@ -143,12 +141,15 @@ int CErksPopupMenuWnd::CalcWidth(CDC& dc) const
 {
     int maxText = 0;
     for (auto& it : m_items)
-        maxText = max(maxText, TextWidth(dc, it.text));
+        maxText = std::max(maxText, TextWidth(dc, it.text));
 
-    // left+right padding plus some room
-    int w = (m_paddingX * 2) + maxText + 24;
-    if (w < 180)
-        w = 180;
+    // Match standard menu padding (approximately 40-50px total for left+right margins and checkmark space)
+    int w = maxText + 50;
+    
+    // Minimum width similar to standard Windows menus
+    if (w < 120)
+        w = 120;
+    
     return w + 2; // border
 }
 
@@ -230,7 +231,8 @@ void CErksPopupMenuWnd::OnPaint()
         dc.DrawText(it.text.c_str(), (int)it.text.size(), &tr, DT_SINGLELINE | DT_VCENTER | DT_LEFT);
     }
 
-    dc.SelectObject(oldFont);
+    if (oldFont)
+        dc.SelectObject(oldFont);
     dc.SelectObject(oldPen);
 }
 

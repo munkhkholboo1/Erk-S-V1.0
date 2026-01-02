@@ -28,6 +28,10 @@
 
 #define ERK_S_V1_0_MODULE
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 /*
 #ifndef _ALLOW_RTCc_IN_STL
 #define _ALLOW_RTCc_IN_STL

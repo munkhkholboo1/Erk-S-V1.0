@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <string>
 #include "Resource.h"
+#include "ErksMapPreviewWnd.h"
 
 class CErksMainDialog : public CAdUiDialog
 {
@@ -48,6 +49,8 @@ private:
     COLORREF m_hotBackColor = RGB(45, 45, 48);
     COLORREF m_borderColor = RGB(60, 60, 60);
 
+    CErksMapPreviewWnd m_mapPreview;
+
     std::unordered_map<UINT, std::wstring> m_menuTextById;
 
     void CaptureMenuText(CMenu* menu);
@@ -69,4 +72,3 @@ private:
     void DrawMenuStrip(CDC& dc);
     void ShowTopMenuPopup(int topIndex, const CRect& rcItem);
 };
-    
