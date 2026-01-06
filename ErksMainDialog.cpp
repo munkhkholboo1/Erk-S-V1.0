@@ -44,6 +44,7 @@ BEGIN_MESSAGE_MAP(CErksMainDialog, CAdUiDialog)
     ON_WM_NCLBUTTONDOWN()
     ON_WM_PAINT()
     ON_WM_LBUTTONDOWN()
+    ON_BN_CLICKED(IDC_BTN_RELOAD_EXISTING_DATA, &CErksMainDialog::OnReloadExistingData)
 END_MESSAGE_MAP()
 
 CErksMainDialog::CErksMainDialog(CWnd* pParent)
@@ -273,13 +274,25 @@ static HINSTANCE ErksResourceHandle()
     return _hdllInstance ? _hdllInstance : AfxGetResourceHandle();
 }
 
+static void BringErksDialogToFront(HWND hwnd)
+{
+    if (!hwnd)
+        return;
+
+    ::SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
+    ::ShowWindow(hwnd, SW_SHOW);
+    ::BringWindowToTop(hwnd);
+    ::SetForegroundWindow(hwnd);
+    ::SetActiveWindow(hwnd);
+}
+
 void CErksMainDialog::ForceTopLevelWindow()
 {
     if (!GetSafeHwnd())
         return;
 
-    // If the window is owned/parented by AutoCAD, caption buttons and sizing can be suppressed.
-    // Clearing GWLP_HWNDPARENT removes both parent/owner for top-level popup windows.
     ::SetWindowLongPtr(GetSafeHwnd(), GWLP_HWNDPARENT, 0);
 }
 
@@ -301,6 +314,398 @@ void CErksMainDialog::RefreshFrameStyles()
 
     ::SetWindowPos(GetSafeHwnd(), nullptr, 0, 0, 0, 0,
         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE);
+}
+
+bool CErksMainDialog::LoadExistingDataFromPath(const CString& path, bool showErrors)
+{
+    if (path.IsEmpty())
+        return false;
+
+    auto layerEquals = [](const ACHAR* a, const wchar_t* b) -> bool {
+        if (!a || !b) return false;
+        CStringW wa(a);
+        wa.MakeLower();
+        CStringW wb(b);
+        wb.MakeLower();
+        return wa == wb;
+    };
+
+    auto addSegment = [](CErksMapPreviewWnd::Polyline2d& pl, const AcGePoint3d& p)
+    {
+        pl.pts.push_back(CErksMapPreviewWnd::PointF((float)p.x, (float)p.y, (float)p.z));
+    };
+
+    auto addArcApprox = [&](CErksMapPreviewWnd::Polyline2d& pl, const AcGePoint3d& center, double radius, double startAng, double endAng, int steps)
+    {
+        if (steps < 4) steps = 4;
+
+        double da = endAng - startAng;
+        while (da <= 0.0) da += (2.0 * 3.14159265358979323846);
+
+        for (int i = 0; i <= steps; ++i)
+        {
+            const double t = (double)i / (double)steps;
+            const double a = startAng + (da * t);
+            const double x = center.x + radius * cos(a);
+            const double y = center.y + radius * sin(a);
+            pl.pts.push_back(CErksMapPreviewWnd::PointF((float)x, (float)y, (float)center.z));
+        }
+    };
+
+    auto addCircleApprox = [&](CErksMapPreviewWnd::Polyline2d& pl, const AcGePoint3d& center, double radius, int steps)
+    {
+        if (steps < 8) steps = 8;
+        for (int i = 0; i < steps; ++i)
+        {
+            const double a = (2.0 * 3.14159265358979323846) * ((double)i / (double)steps);
+            const double x = center.x + radius * cos(a);
+            const double y = center.y + radius * sin(a);
+            pl.pts.push_back(CErksMapPreviewWnd::PointF((float)x, (float)y, (float)center.z));
+        }
+        pl.closed = true;
+    };
+
+    auto extractEntityAsPolyline = [&](const AcDbEntity* ent, CErksMapPreviewWnd::Polyline2d& out) -> bool
+    {
+        if (!ent)
+            return false;
+
+        if (const AcDbLine* ln = AcDbLine::cast(ent))
+        {
+            addSegment(out, ln->startPoint());
+            addSegment(out, ln->endPoint());
+            return true;
+        }
+
+        if (const AcDbArc* arc = AcDbArc::cast(ent))
+        {
+            const double r = arc->radius();
+            const double sweep = arc->endAngle() - arc->startAngle();
+            const int steps = std::max(12, (int)std::ceil(std::abs(sweep) / (3.14159265358979323846 / 18.0)));
+            addArcApprox(out, arc->center(), r, arc->startAngle(), arc->endAngle(), steps);
+            return true;
+        }
+
+        if (const AcDbCircle* cir = AcDbCircle::cast(ent))
+        {
+            addCircleApprox(out, cir->center(), cir->radius(), 72);
+            return true;
+        }
+
+        if (const AcDbPolyline* pl = AcDbPolyline::cast(ent))
+        {
+            const int n = pl->numVerts();
+            if (n <= 0)
+                return false;
+
+            for (int i = 0; i < n; ++i)
+            {
+                AcGePoint3d p;
+                pl->getPointAt(i, p);
+                out.pts.push_back(CErksMapPreviewWnd::PointF((float)p.x, (float)p.y, (float)p.z));
+            }
+
+            out.closed = pl->isClosed();
+            return true;
+        }
+
+        if (const AcDb2dPolyline* pl2 = AcDb2dPolyline::cast(ent))
+        {
+            AcDbObjectIterator* it = pl2->vertexIterator();
+            if (!it) return false;
+
+            std::unique_ptr<AcDbObjectIterator> itGuard(it);
+
+            for (; !it->done(); it->step())
+            {
+                AcDbObjectId vid = it->objectId();
+                AcDbObject* obj = nullptr;
+                if (acdbOpenObject(obj, vid, AcDb::kForRead) != Acad::eOk || !obj)
+                    continue;
+
+                AcDb2dVertex* v = AcDb2dVertex::cast(obj);
+                if (v)
+                {
+                    const AcGePoint3d p = v->position();
+                    out.pts.push_back(CErksMapPreviewWnd::PointF((float)p.x, (float)p.y, (float)p.z));
+                }
+                obj->close();
+            }
+
+            out.closed = pl2->isClosed();
+            return out.pts.size() >= 2;
+        }
+
+        if (const AcDbSpline* sp = AcDbSpline::cast(ent))
+        {
+            const int steps = 64;
+            double startP = 0.0, endP = 1.0;
+            if (sp->getStartParam(startP) == Acad::eOk && sp->getEndParam(endP) == Acad::eOk)
+            {
+                for (int i = 0; i <= steps; ++i)
+                {
+                    const double t = startP + (endP - startP) * ((double)i / (double)steps);
+                    AcGePoint3d p;
+                    if (sp->getPointAtParam(t, p) == Acad::eOk)
+                        out.pts.push_back(CErksMapPreviewWnd::PointF((float)p.x, (float)p.y, (float)p.z));
+                }
+                return out.pts.size() >= 2;
+            }
+            return false;
+        }
+
+        return false;
+    };
+
+    std::unique_ptr<AcDbDatabase> db(new AcDbDatabase(false, true));
+
+    const Acad::ErrorStatus esRead = db->readDwgFile((LPCTSTR)path);
+    if (esRead != Acad::eOk)
+    {
+        if (showErrors)
+        {
+            CString msg;
+            msg.Format(_T("Failed to read DWG: %s (Error %d)"), path.GetString(), (int)esRead);
+            AfxMessageBox(msg, MB_OK | MB_ICONERROR);
+        }
+        return false;
+    }
+
+    db->updateExt();
+    const AcGePoint3d mn = db->extmin();
+    const AcGePoint3d mx = db->extmax();
+
+    ErksPrint(L"DWG extents min=(%.3f,%.3f) max=(%.3f,%.3f)", mn.x, mn.y, mx.x, mx.y);
+
+    AcDbBlockTable* bt = nullptr;
+    if (db->getBlockTable(bt, AcDb::kForRead) != Acad::eOk || !bt)
+    {
+        AfxMessageBox(_T("Failed to open block table."), MB_OK | MB_ICONERROR);
+        return false;
+    }
+
+    AcDbBlockTableRecord* ms = nullptr;
+    if (bt->getAt(ACDB_MODEL_SPACE, ms, AcDb::kForRead) != Acad::eOk || !ms)
+    {
+        bt->close();
+        AfxMessageBox(_T("Failed to open model space."), MB_OK | MB_ICONERROR);
+        return false;
+    }
+
+    bt->close();
+
+    std::vector<CErksMapPreviewWnd::Polyline2d> polys;
+
+    bool foundMinor = false;
+    bool foundMajor = false;
+
+    AcDbBlockTableRecordIterator* it = nullptr;
+    if (ms->newIterator(it) != Acad::eOk || !it)
+    {
+        ms->close();
+        AfxMessageBox(_T("Failed to iterate model space."), MB_OK | MB_ICONERROR);
+        return false;
+    }
+
+    std::unique_ptr<AcDbBlockTableRecordIterator> itGuard(it);
+
+    for (; !it->done(); it->step())
+    {
+        AcDbEntity* ent = nullptr;
+        if (it->getEntity(ent, AcDb::kForRead) != Acad::eOk || !ent)
+            continue;
+
+        const ACHAR* layer = ent->layer();
+        const bool isMinor = layerEquals(layer, L"minor");
+        const bool isMajor = layerEquals(layer, L"major");
+
+        if (!isMinor && !isMajor)
+        {
+            ent->close();
+            continue;
+        }
+
+        if (isMinor) foundMinor = true;
+        if (isMajor) foundMajor = true;
+
+        CErksMapPreviewWnd::Polyline2d pl;
+        pl.color = isMajor ? RGB(230, 230, 230) : RGB(160, 160, 160);
+
+        const bool ok = extractEntityAsPolyline(ent, pl);
+        ent->close();
+
+        if (!(ok && pl.pts.size() >= 2))
+            continue;
+
+        polys.push_back(pl);
+    }
+
+    ms->close();
+
+    if (m_mapPreview.GetSafeHwnd())
+        m_mapPreview.SetGeometry(polys);
+
+    if (!foundMinor && !foundMajor)
+        AfxMessageBox(_T("No entities found on layers 'minor' or 'major'."), MB_OK | MB_ICONWARNING);
+
+    return true;
+}
+
+static bool PathsEqualNoCase(const CString& a, const CString& b)
+{
+    CString aa(a), bb(b);
+    aa.Trim();
+    bb.Trim();
+    return aa.CompareNoCase(bb) == 0;
+}
+
+bool CErksMainDialog::LoadExistingDataFromCurrentDocumentIfMatches()
+{
+    if (m_lastExistingDataPath.IsEmpty())
+        return false;
+
+    AcApDocument* doc = acDocManager ? acDocManager->curDocument() : nullptr;
+    if (!doc)
+        return false;
+
+    AcDbDatabase* db = doc->database();
+    if (!db)
+        return false;
+
+    // If the currently open drawing matches the selected existing-data path, reload from it.
+    const ACHAR* docName = doc->fileName();
+    if (!docName || docName[0] == 0)
+        return false;
+
+    if (!PathsEqualNoCase(CString(docName), m_lastExistingDataPath))
+        return false;
+
+    // Iterate model space directly from current DB.
+    AcDbBlockTable* bt = nullptr;
+    if (db->getBlockTable(bt, AcDb::kForRead) != Acad::eOk || !bt)
+        return false;
+
+    AcDbBlockTableRecord* ms = nullptr;
+    if (bt->getAt(ACDB_MODEL_SPACE, ms, AcDb::kForRead) != Acad::eOk || !ms)
+    {
+        bt->close();
+        return false;
+    }
+
+    bt->close();
+
+    std::vector<CErksMapPreviewWnd::Polyline2d> polys;
+    bool foundMinor = false;
+    bool foundMajor = false;
+
+    AcDbBlockTableRecordIterator* it = nullptr;
+    if (ms->newIterator(it) != Acad::eOk || !it)
+    {
+        ms->close();
+        return false;
+    }
+
+    std::unique_ptr<AcDbBlockTableRecordIterator> itGuard(it);
+
+    auto layerEquals = [](const ACHAR* a, const wchar_t* b) -> bool {
+        if (!a || !b) return false;
+        CStringW wa(a);
+        wa.MakeLower();
+        CStringW wb(b);
+        wb.MakeLower();
+        return wa == wb;
+    };
+
+    auto addSegment = [](CErksMapPreviewWnd::Polyline2d& pl, const AcGePoint3d& p)
+    {
+        pl.pts.push_back(CErksMapPreviewWnd::PointF((float)p.x, (float)p.y, (float)p.z));
+    };
+
+    auto extractEntityAsPolyline = [&](const AcDbEntity* ent, CErksMapPreviewWnd::Polyline2d& out) -> bool
+    {
+        if (!ent)
+            return false;
+
+        if (const AcDbLine* ln = AcDbLine::cast(ent))
+        {
+            addSegment(out, ln->startPoint());
+            addSegment(out, ln->endPoint());
+            return true;
+        }
+
+        if (const AcDbPolyline* pl = AcDbPolyline::cast(ent))
+        {
+            const int n = pl->numVerts();
+            if (n <= 0)
+                return false;
+            for (int i = 0; i < n; ++i)
+            {
+                AcGePoint3d p;
+                pl->getPointAt(i, p);
+                out.pts.push_back(CErksMapPreviewWnd::PointF((float)p.x, (float)p.y, (float)p.z));
+            }
+            out.closed = pl->isClosed();
+            return true;
+        }
+
+        // Keep current-document fallback simple (lines + lwpolylines). Other types still require file load.
+        return false;
+    };
+
+    for (; !it->done(); it->step())
+    {
+        AcDbEntity* ent = nullptr;
+        if (it->getEntity(ent, AcDb::kForRead) != Acad::eOk || !ent)
+            continue;
+
+        const ACHAR* layer = ent->layer();
+        const bool isMinor = layerEquals(layer, L"minor");
+        const bool isMajor = layerEquals(layer, L"major");
+
+        if (!isMinor && !isMajor)
+        {
+            ent->close();
+            continue;
+        }
+
+        if (isMinor) foundMinor = true;
+        if (isMajor) foundMajor = true;
+
+        CErksMapPreviewWnd::Polyline2d pl;
+        pl.color = isMajor ? RGB(230, 230, 230) : RGB(160, 160, 160);
+
+        const bool ok = extractEntityAsPolyline(ent, pl);
+        ent->close();
+
+        if (!(ok && pl.pts.size() >= 2))
+            continue;
+
+        polys.push_back(pl);
+    }
+
+    ms->close();
+
+    if (m_mapPreview.GetSafeHwnd())
+        m_mapPreview.SetGeometry(polys);
+
+    if (!foundMinor && !foundMajor)
+        AfxMessageBox(_T("No entities found on layers 'minor' or 'major'."), MB_OK | MB_ICONWARNING);
+
+    return true;
+}
+
+bool CErksMainDialog::ReloadExistingData()
+{
+    if (m_lastExistingDataPath.IsEmpty())
+        return false;
+
+    // Try a lock-tolerant path first: if file read fails but current doc matches,
+    // we can still reload without showing a scary error dialog.
+    if (LoadExistingDataFromCurrentDocumentIfMatches())
+        return true;
+
+    // Otherwise, do file load (and show errors if it fails).
+    return LoadExistingDataFromPath(m_lastExistingDataPath, true);
 }
 
 BOOL CErksMainDialog::OnInitDialog()
@@ -366,6 +771,8 @@ BOOL CErksMainDialog::OnInitDialog()
     {
         m_mapPreview.Create(this);
         m_mapPreview.SetTheme(m_backColor, m_borderColor, m_textColor);
+        m_mapPreview.SetReloadTarget(this, IDC_BTN_RELOAD_EXISTING_DATA);
+        m_mapPreview.SetReloadEnabled(FALSE);
         m_mapPreview.ShowWindow(SW_SHOW);
     }
 
@@ -391,6 +798,35 @@ BOOL CErksMainDialog::OnInitDialog()
     // Host apps can tweak styles after init; re-apply once.
     RefreshFrameStyles();
     ErksRuntimeTrace::DumpWindowStyles(GetSafeHwnd(), L"Dialog After RefreshFrameStyles");
+
+    // Force above AutoCAD.
+    BringErksDialogToFront(GetSafeHwnd());
+
+    // Create reload button (resource control)
+    if (!m_btnReloadExisting.GetSafeHwnd())
+    {
+        m_btnReloadExisting.SubclassDlgItem(IDC_BTN_RELOAD_EXISTING_DATA, this);
+        // Hidden: kept only as a command target for the preview overlay button.
+        m_btnReloadExisting.SetWindowText(_T("Reload"));
+        m_btnReloadExisting.EnableWindow(FALSE);
+        m_btnReloadExisting.ShowWindow(SW_HIDE);
+    }
+
+    // Ensure initial layout is applied so the button is visible without requiring a resize.
+    // Calling OnSize() directly during init can be unsafe in hosted environments; instead,
+    // nudge a layout pass.
+    if (GetSafeHwnd())
+    {
+        ::SetWindowPos(GetSafeHwnd(), nullptr, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+        Invalidate(FALSE);
+        if (m_mapPreview.GetSafeHwnd())
+        {
+            m_mapPreview.Invalidate(FALSE);
+            m_mapPreview.UpdateWindow();
+        }
+        UpdateWindow();
+    }
 
     return TRUE;
 }
@@ -448,13 +884,13 @@ BOOL CErksMainDialog::OnCommand(WPARAM wParam, LPARAM lParam)
 
     switch (id)
     {
-    case ID_ERKS_FILE_OPEN: OnFileOpen(); return TRUE;
-    case ID_ERKS_FILE_SAVE: OnFileSave(); return TRUE;
-    case ID_ERKS_FILE_SAVEAS: OnFileSaveAs(); return TRUE;
-    case ID_ERKS_FILE_OPEN_EXISTING_DATA: OnFileOpenExistingData(); return TRUE;
-    case ID_ERKS_FILE_CREATE_ROAD_AXIS: OnFileCreateRoadAxis(); return TRUE;
+    case ID_ERKS_FILE_OPEN: OnFileOpen(); BringErksDialogToFront(GetSafeHwnd()); return TRUE;
+    case ID_ERKS_FILE_SAVE: OnFileSave(); BringErksDialogToFront(GetSafeHwnd()); return TRUE;
+    case ID_ERKS_FILE_SAVEAS: OnFileSaveAs(); BringErksDialogToFront(GetSafeHwnd()); return TRUE;
+    case ID_ERKS_FILE_OPEN_EXISTING_DATA: OnFileOpenExistingData(); BringErksDialogToFront(GetSafeHwnd()); return TRUE;
+    case ID_ERKS_FILE_CREATE_ROAD_AXIS: OnFileCreateRoadAxis(); BringErksDialogToFront(GetSafeHwnd()); return TRUE;
     case ID_ERKS_FILE_EXIT: OnFileExit(); return TRUE;
-    case ID_ERKS_HELP_ABOUT: OnHelpAbout(); return TRUE;
+    case ID_ERKS_HELP_ABOUT: OnHelpAbout(); BringErksDialogToFront(GetSafeHwnd()); return TRUE;
     default:
         return CDialog::OnCommand(wParam, lParam);
     }
@@ -519,9 +955,14 @@ void CErksMainDialog::OnMeasureItem(int nIDCtl, LPMEASUREITEMSTRUCT lpMeasureIte
 
 void CErksMainDialog::OnDrawItem(int nIDCtl, LPDRAWITEMSTRUCT lpDrawItemStruct)
 {
+    // Let base handle menu items.
     CDialog::OnDrawItem(nIDCtl, lpDrawItemStruct);
 
-    if (!lpDrawItemStruct || lpDrawItemStruct->CtlType != ODT_MENU)
+    if (!lpDrawItemStruct)
+        return;
+
+    // Existing menu owner-draw path
+    if (lpDrawItemStruct->CtlType != ODT_MENU)
         return;
 
     CDC dc;
@@ -673,6 +1114,9 @@ void CErksMainDialog::OnPaint()
 
     RecalcMenuStripRects();
     DrawMenuStrip(dc);
+
+    // Keep it above AutoCAD even if host steals focus.
+    BringErksDialogToFront(GetSafeHwnd());
 }
 
 void CErksMainDialog::OnLButtonDown(UINT nFlags, CPoint point)
@@ -752,21 +1196,78 @@ void CErksMainDialog::OnSize(UINT nType, int cx, int cy)
     CAdUiDialog::OnSize(nType, cx, cy);
 
     const int margin = 12;
-    const int top = m_menuStripHeight + margin;
-    const int bottom = margin;
+
+    // Preview fills area below menu strip (no extra space reserved for reload; it's overlay).
+    const int previewTop = m_menuStripHeight + margin;
+    const int previewBottom = cy - margin;
 
     int w = cx - (margin * 2);
-    int h = cy - top - bottom;
+    int h = previewBottom - previewTop;
     if (w < 0) w = 0;
     if (h < 0) h = 0;
+
+    if (m_btnReloadExisting.GetSafeHwnd())
+        m_btnReloadExisting.ShowWindow(SW_HIDE);
 
     if (m_mapPreview.GetSafeHwnd())
     {
         m_mapPreview.ShowWindow(SW_SHOW);
-        m_mapPreview.SetWindowPos(nullptr, margin, top, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+        m_mapPreview.SetWindowPos(nullptr, margin, previewTop, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
     }
 
     Invalidate(FALSE);
+}
+
+void CErksMainDialog::OnReloadExistingData()
+{
+    if (m_lastExistingDataPath.IsEmpty())
+        return;
+
+    const bool ok = ReloadExistingData();
+    if (m_mapPreview.GetSafeHwnd())
+        m_mapPreview.SetReloadEnabled(ok && !m_lastExistingDataPath.IsEmpty());
+    BringErksDialogToFront(GetSafeHwnd());
+}
+
+void CErksMainDialog::OnFileOpenExistingData()
+{
+    // Keep our dialog above AutoCAD while browsing.
+    ::SetWindowPos(GetSafeHwnd(), HWND_TOPMOST, 0, 0, 0, 0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
+    CFileDialog dlg(TRUE, _T("dwg"), nullptr,
+        OFN_FILEMUSTEXIST | OFN_HIDEREADONLY,
+        _T("AutoCAD Drawing (*.dwg)|*.dwg|All Files (*.*)|*.*||"),
+        this);
+
+    // Try to keep the file dialog above as well.
+    dlg.m_ofn.Flags |= OFN_EXPLORER;
+
+    const INT_PTR r = dlg.DoModal();
+
+    // Restore ours to front.
+    ::SetWindowPos(GetSafeHwnd(), HWND_TOPMOST, 0, 0, 0, 0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    ::BringWindowToTop(GetSafeHwnd());
+
+    if (r != IDOK)
+        return;
+
+    const CString path = dlg.GetPathName();
+    if (path.IsEmpty())
+        return;
+
+    m_lastExistingDataPath = path;
+
+    const bool ok = ReloadExistingData();
+
+    if (m_btnReloadExisting.GetSafeHwnd())
+        m_btnReloadExisting.EnableWindow(ok && !m_lastExistingDataPath.IsEmpty());
+    
+    if (m_mapPreview.GetSafeHwnd())
+        m_mapPreview.SetReloadEnabled(ok && !m_lastExistingDataPath.IsEmpty());
+
+    BringErksDialogToFront(GetSafeHwnd());
 }
 
 static std::vector<ErksPopupMenuItem> BuildPopupModel(CMenu* menu, CErksMainDialog* dlg)
@@ -829,249 +1330,4 @@ const std::wstring* CErksMainDialog::TryGetMenuText(UINT id) const
     if (it == m_menuTextById.end())
         return nullptr;
     return &it->second;
-}
-
-static bool ErksLayerEquals(const ACHAR* a, const wchar_t* b)
-{
-    if (!a || !b) return false;
-    CStringW wa(a);
-    wa.MakeLower();
-    CStringW wb(b);
-    wb.MakeLower();
-    return wa == wb;
-}
-
-static void AddSegment(CErksMapPreviewWnd::Polyline2d& pl, const AcGePoint3d& p)
-{
-    pl.pts.push_back(CErksMapPreviewWnd::PointF((float)p.x, (float)p.y));
-}
-
-static void AddArcApprox(CErksMapPreviewWnd::Polyline2d& pl, const AcGePoint3d& center, double radius, double startAng, double endAng, int steps)
-{
-    if (steps < 4) steps = 4;
-
-    double da = endAng - startAng;
-    while (da <= 0.0) da += (2.0 * 3.14159265358979323846);
-
-    for (int i = 0; i <= steps; ++i)
-    {
-        const double t = (double)i / (double)steps;
-        const double a = startAng + (da * t);
-        const double x = center.x + radius * cos(a);
-        const double y = center.y + radius * sin(a);
-        pl.pts.push_back(CErksMapPreviewWnd::PointF((float)x, (float)y));
-    }
-}
-
-static void AddCircleApprox(CErksMapPreviewWnd::Polyline2d& pl, const AcGePoint3d& center, double radius, int steps)
-{
-    if (steps < 8) steps = 8;
-    for (int i = 0; i < steps; ++i)
-    {
-        const double a = (2.0 * 3.14159265358979323846) * ((double)i / (double)steps);
-        const double x = center.x + radius * cos(a);
-        const double y = center.y + radius * sin(a);
-        pl.pts.push_back(CErksMapPreviewWnd::PointF((float)x, (float)y));
-    }
-    pl.closed = true;
-}
-
-static bool ExtractEntityAsPolyline(const AcDbEntity* ent, CErksMapPreviewWnd::Polyline2d& out)
-{
-    if (!ent)
-        return false;
-
-    if (const AcDbLine* ln = AcDbLine::cast(ent))
-    {
-        AddSegment(out, ln->startPoint());
-        AddSegment(out, ln->endPoint());
-        return true;
-    }
-
-    if (const AcDbArc* arc = AcDbArc::cast(ent))
-    {
-        const double r = arc->radius();
-        const double sweep = arc->endAngle() - arc->startAngle();
-        const int steps = std::max(12, (int)std::ceil(std::abs(sweep) / (3.14159265358979323846 / 18.0))); // ~10 deg
-        AddArcApprox(out, arc->center(), r, arc->startAngle(), arc->endAngle(), steps);
-        return true;
-    }
-
-    if (const AcDbCircle* cir = AcDbCircle::cast(ent))
-    {
-        AddCircleApprox(out, cir->center(), cir->radius(), 72);
-        return true;
-    }
-
-    if (const AcDbPolyline* pl = AcDbPolyline::cast(ent))
-    {
-        const int n = pl->numVerts();
-        if (n <= 0)
-            return false;
-
-        for (int i = 0; i < n; ++i)
-        {
-            AcGePoint3d p;
-            pl->getPointAt(i, p);
-            out.pts.push_back(CErksMapPreviewWnd::PointF((float)p.x, (float)p.y));
-        }
-
-        out.closed = pl->isClosed();
-        return true;
-    }
-
-    if (const AcDb2dPolyline* pl2 = AcDb2dPolyline::cast(ent))
-    {
-        AcDbObjectIterator* it = pl2->vertexIterator();
-        if (!it) return false;
-
-        std::unique_ptr<AcDbObjectIterator> itGuard(it);
-
-        for (; !it->done(); it->step())
-        {
-            AcDbObjectId vid = it->objectId();
-            AcDbObject* obj = nullptr;
-            if (acdbOpenObject(obj, vid, AcDb::kForRead) != Acad::eOk || !obj)
-                continue;
-
-            AcDb2dVertex* v = AcDb2dVertex::cast(obj);
-            if (v)
-            {
-                const AcGePoint3d p = v->position();
-                out.pts.push_back(CErksMapPreviewWnd::PointF((float)p.x, (float)p.y));
-            }
-            obj->close();
-        }
-
-        out.closed = pl2->isClosed();
-        return out.pts.size() >= 2;
-    }
-
-    if (const AcDbSpline* sp = AcDbSpline::cast(ent))
-    {
-        // Sample spline by parameter (portable across ARX versions)
-        const int steps = 64;
-        double startP = 0.0, endP = 1.0;
-        if (sp->getStartParam(startP) == Acad::eOk && sp->getEndParam(endP) == Acad::eOk)
-        {
-            for (int i = 0; i <= steps; ++i)
-            {
-                const double t = startP + (endP - startP) * ((double)i / (double)steps);
-                AcGePoint3d p;
-                if (sp->getPointAtParam(t, p) == Acad::eOk)
-                    out.pts.push_back(CErksMapPreviewWnd::PointF((float)p.x, (float)p.y));
-            }
-            return out.pts.size() >= 2;
-        }
-
-        return false;
-    }
-
-    return false;
-}
-
-void CErksMainDialog::OnFileOpenExistingData()
-{
-    CFileDialog dlg(TRUE, _T("dwg"), nullptr,
-        OFN_FILEMUSTEXIST | OFN_HIDEREADONLY,
-        _T("AutoCAD Drawing (*.dwg)|*.dwg|All Files (*.*)|*.*||"),
-        this);
-
-    if (dlg.DoModal() != IDOK)
-        return;
-
-    const CString path = dlg.GetPathName();
-    if (path.IsEmpty())
-        return;
-
-    std::unique_ptr<AcDbDatabase> db(new AcDbDatabase(false, true));
-
-    const Acad::ErrorStatus esRead = db->readDwgFile((LPCTSTR)path);
-    if (esRead != Acad::eOk)
-    {
-        CString msg;
-        msg.Format(_T("Failed to read DWG: %s (Error %d)"), path.GetString(), (int)esRead);
-        AfxMessageBox(msg, MB_OK | MB_ICONERROR);
-        return;
-    }
-
-    // Compute extents
-    db->updateExt();
-    const AcGePoint3d mn = db->extmin();
-    const AcGePoint3d mx = db->extmax();
-
-    ErksPrint(L"DWG extents min=(%.3f,%.3f) max=(%.3f,%.3f)", mn.x, mn.y, mx.x, mx.y);
-
-    // --- Extract entities for legacy preview
-
-    AcDbBlockTable* bt = nullptr;
-    if (db->getBlockTable(bt, AcDb::kForRead) != Acad::eOk || !bt)
-    {
-        AfxMessageBox(_T("Failed to open block table."), MB_OK | MB_ICONERROR);
-        return;
-    }
-
-    AcDbBlockTableRecord* ms = nullptr;
-    if (bt->getAt(ACDB_MODEL_SPACE, ms, AcDb::kForRead) != Acad::eOk || !ms)
-    {
-        bt->close();
-        AfxMessageBox(_T("Failed to open model space."), MB_OK | MB_ICONERROR);
-        return;
-    }
-
-    bt->close();
-
-    std::vector<CErksMapPreviewWnd::Polyline2d> polys;
-
-    bool foundMinor = false;
-    bool foundMajor = false;
-
-    AcDbBlockTableRecordIterator* it = nullptr;
-    if (ms->newIterator(it) != Acad::eOk || !it)
-    {
-        ms->close();
-        AfxMessageBox(_T("Failed to iterate model space."), MB_OK | MB_ICONERROR);
-        return;
-    }
-
-    std::unique_ptr<AcDbBlockTableRecordIterator> itGuard(it);
-
-    for (; !it->done(); it->step())
-    {
-        AcDbEntity* ent = nullptr;
-        if (it->getEntity(ent, AcDb::kForRead) != Acad::eOk || !ent)
-            continue;
-
-        const ACHAR* layer = ent->layer();
-        const bool isMinor = ErksLayerEquals(layer, L"minor");
-        const bool isMajor = ErksLayerEquals(layer, L"major");
-
-        if (!isMinor && !isMajor)
-        {
-            ent->close();
-            continue;
-        }
-
-        if (isMinor) foundMinor = true;
-        if (isMajor) foundMajor = true;
-
-        CErksMapPreviewWnd::Polyline2d pl;
-        pl.color = isMajor ? RGB(230, 230, 230) : RGB(160, 160, 160);
-
-        const bool ok = ExtractEntityAsPolyline(ent, pl);
-        ent->close();
-
-        if (!(ok && pl.pts.size() >= 2))
-            continue;
-
-        polys.push_back(pl);
-    }
-
-    ms->close();
-
-    if (m_mapPreview.GetSafeHwnd())
-        m_mapPreview.SetGeometry(polys);
-
-    if (!foundMinor && !foundMajor)
-        AfxMessageBox(_T("No entities found on layers 'minor' or 'major'."), MB_OK | MB_ICONWARNING);
 }

@@ -44,6 +44,9 @@
   <ItemGroup>
     <Image Include="Erk-S V1.0.ico" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="CONTRIBUTING.md" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <ArxAppType>arx</ArxAppType>
     <RDS>Erks</RDS>

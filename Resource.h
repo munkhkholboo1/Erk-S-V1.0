@@ -20,6 +20,7 @@
 #define IDB_ERKS_LOGO_64                     500
 #define IDB_ERKS_LOGO_100                    502
 
+#define IDC_BTN_RELOAD_EXISTING_DATA     2001
 // Next default values for new objects
 //
 #ifdef APSTUDIO_INVOKED

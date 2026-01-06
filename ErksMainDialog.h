@@ -39,6 +39,8 @@ protected:
     afx_msg void OnPaint();
     afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
 
+    afx_msg void OnReloadExistingData();
+
     DECLARE_MESSAGE_MAP()
 
 private:
@@ -50,6 +52,11 @@ private:
     COLORREF m_borderColor = RGB(60, 60, 60);
 
     CErksMapPreviewWnd m_mapPreview;
+
+    CString m_lastExistingDataPath;
+    CButton m_btnReloadExisting;
+
+    bool ReloadExistingData();
 
     std::unordered_map<UINT, std::wstring> m_menuTextById;
 
@@ -71,4 +78,8 @@ private:
     void RecalcMenuStripRects();
     void DrawMenuStrip(CDC& dc);
     void ShowTopMenuPopup(int topIndex, const CRect& rcItem);
+
+    bool LoadExistingDataFromPath(const CString& path, bool showErrors);
+    bool LoadExistingDataFromPath(const CString& path) { return LoadExistingDataFromPath(path, true); }
+    bool LoadExistingDataFromCurrentDocumentIfMatches();
 };
